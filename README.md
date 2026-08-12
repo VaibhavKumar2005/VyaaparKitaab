@@ -218,6 +218,28 @@ VyaparKitaab
 ## Phase 4 — Future Enhancements
 
 - WhatsApp integration
+
+---
+
+## Quick Start
+
+Run the FastAPI backend with Docker (recommended):
+
+```bash
+docker build -t vyaaparkitaab-backend -f docker/Dockerfile .
+docker run --env-file .env.example -p 8000:8000 vyaaparkitaab-backend
+```
+
+Or run locally with Uvicorn:
+
+```bash
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+## Contributing
+
+See `CONTRIBUTING.md` for guidelines on setting up a development environment, coding style, and submitting pull requests.
 - Android application
 - Regional language support
 - Multi-store management
