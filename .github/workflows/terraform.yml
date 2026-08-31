@@ -1,0 +1,111 @@
+name: Terraform Azure
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch:
+    inputs:
+      azure_client_id:
+        description: Azure client ID for OIDC login
+        required: true
+        type: string
+      azure_tenant_id:
+        description: Azure tenant ID for OIDC login
+        required: true
+        type: string
+      azure_subscription_id:
+        description: Azure subscription ID for the deployment
+        required: true
+        type: string
+      tf_state_resource_group:
+        description: Resource group that holds the Terraform state storage account
+        required: true
+        type: string
+      tf_state_storage_account:
+        description: Storage account name for the Terraform state backend
+        required: true
+        type: string
+      tf_state_container:
+        description: Container name for the Terraform state backend
+        required: true
+        type: string
+      tf_state_key:
+        description: Blob key used for the Terraform state file
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_IN_AUTOMATION: true
+  TF_INPUT: false
+  TF_DIR: infra/terraform
+
+jobs:
+  ci:
+    name: Terraform CI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -backend=false
+
+      - name: Terraform Format
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate
+
+  deploy:
+    name: Terraform Deploy
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ inputs.azure_client_id }}
+          tenant-id: ${{ inputs.azure_tenant_id }}
+          subscription-id: ${{ inputs.azure_subscription_id }}
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ inputs.tf_state_resource_group }}" \
+            -backend-config="storage_account_name=${{ inputs.tf_state_storage_account }}" \
+            -backend-config="container_name=${{ inputs.tf_state_container }}" \
+            -backend-config="key=${{ inputs.tf_state_key }}"
+
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -auto-approve tfplan
