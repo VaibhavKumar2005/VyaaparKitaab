@@ -289,3 +289,18 @@ This project is licensed under the MIT License.
 # ⭐ Support
 
 If you found this project interesting, consider giving it a ⭐ on GitHub.
+
+---
+
+## Quick Start (docker-compose)
+
+This repository includes a minimal `docker-compose.yml` to run a Postgres database and the backend.
+
+Start the stack:
+
+```bash
+docker-compose up --build
+```
+
+Open `http://localhost:8000` to see the simple frontend and `http://localhost:8000/health` for the API health.
+
