@@ -19,7 +19,7 @@
 
 Many small businesses still depend on paper registers, WhatsApp chats, Excel sheets, and disconnected software to manage their daily operations. This often leads to manual errors, duplicate work, and poor visibility into business performance.
 
-VyaparKitaab aims to bring bookkeeping, inventory, customer management, invoicing, analytics, and AI-powered insights into a single cloud platform.
+VyaparKitaab aims to bring bookkeeping, inventory, customer management, invoicing, payments, analytics, and AI-powered insights into a single cloud platform.
 
 ---
 
@@ -31,6 +31,7 @@ Small businesses often struggle with:
 - 📦 Inventory tracking
 - 🧾 Invoice management
 - 👥 Customer records
+- 💳 Payment and transaction management
 - 📊 Business analytics
 - 📈 Sales forecasting
 
@@ -40,7 +41,7 @@ Most existing solutions are either expensive, overly complex, or fragmented acro
 
 # ✨ Vision
 
-Build an intelligent business operating system that helps MSMEs spend less time managing records and more time growing their business.
+Build an intelligent business operating system that helps MSMEs spend less time managing records and more time growing their business, while giving customers a secure and transparent view of their transactions and spending.
 
 ---
 
@@ -55,6 +56,84 @@ Build an intelligent business operating system that helps MSMEs spend less time 
 - Sales tracking
 - Purchase tracking
 - Invoice generation
+- Transaction and payment tracking
+
+---
+
+## 🔐 Secure Transaction Flow
+
+VyaparKitaab is designed to support a secure purchase flow in which customer KYC can be handled by a dedicated KYC application, while OTP-based authentication provides an additional verification step before payment authorization.
+
+A successful transaction can automatically generate a transactional email or message containing the purchase/receipt information.
+
+```text
+KYC Application
+      │
+      ▼
+Customer Verification
+      │
+      ▼
+Store Dashboard (B)
+      │
+      ▼
+OTP Authentication
+      │
+      ▼
+Payment Authorization
+      │
+      ▼
+Transaction Recorded
+      │
+      ├── Store transaction status
+      └── Customer purchase notification
+```
+
+---
+
+## 🖥️ Dual Dashboard Model
+
+### B — Store / Business Dashboard
+
+The store-facing dashboard focuses on day-to-day transaction operations:
+
+- Cash and digital payment records
+- Orders and purchases
+- Discounts applied
+- Payment status
+- Transaction history
+- Refund/transaction records
+- Business-side analytics
+
+### C — Customer Dashboard
+
+The customer-facing dashboard focuses on personal transaction visibility:
+
+- Purchase history
+- Payments made
+- Discounts received/saved
+- Transaction details
+- Spending overview
+- Category and subcategory-wise spending analysis
+
+Spending can be organized hierarchically, for example:
+
+```text
+Spending
+├── Food
+│   ├── Restaurants
+│   ├── Grocery
+│   └── Delivery
+├── Shopping
+│   ├── Electronics
+│   ├── Clothing
+│   └── Household
+└── Transport
+    ├── Fuel
+    ├── Cab
+    └── Public Transport
+```
+
+This allows customers to understand **where their money is being spent**, rather than only viewing a flat list of transactions.
 
 ---
 
@@ -66,12 +145,15 @@ Build an intelligent business operating system that helps MSMEs spend less time 
 - Sales analytics
 - Business anomaly detection
 - Natural language business assistant
+- Transaction/spending classification
 
 Example:
 
 > "How much profit did I make this month?"
 
 > "Which products should I restock?"
+
+> "How much did I spend on food this month?"
 
 ---
 
@@ -83,31 +165,47 @@ Example:
 - Top customers
 - Fast-moving products
 - Business KPIs
+- Customer spending summaries
+- Category-wise transaction analysis
 
 ---
 
 # 🏗️ Proposed Architecture
 
-```
-                React + TypeScript
-                       │
+```text
+                 React + TypeScript
+                         │
+          ┌──────────────┴──────────────┐
+          ▼                             ▼
+   Store Dashboard (B)          Customer Dashboard (C)
+          │                             │
+          └──────────────┬──────────────┘
+                         ▼
+                   FastAPI Backend
+                         │
+       ┌─────────────────┼──────────────────┐
+       ▼                 ▼                  ▼
+ PostgreSQL       Payment Services    Authentication
+       │                 │                  │
+       │                 ▼                  ▼
+       │          Transaction Flow     OTP Verification
+       │
+       └───────────────┬───────────────────┘
                        ▼
-                 FastAPI Backend
+                 AI/ML Services
                        │
-     ┌─────────────────┼──────────────────┐
-     ▼                 ▼                  ▼
-PostgreSQL      AI/ML Services      Authentication
-                     │
-      ┌──────────────┼───────────────┐
-      ▼              ▼               ▼
- Invoice OCR   Forecasting      LLM Assistant
-                     │
-               Databricks
-                     │
-                Delta Lake
-                     │
-                  MLflow
+      ┌────────────────┼────────────────┐
+      ▼                ▼                ▼
+ Invoice OCR     Forecasting     Transaction Classification
+                       │
+                 Databricks
+                       │
+                  Delta Lake
+                       │
+                    MLflow
 ```
+
+KYC is intended to be handled by a **separate KYC application/service**, rather than making the store dashboard responsible for full identity verification.
 
 ---
 
@@ -155,7 +253,7 @@ PostgreSQL      AI/ML Services      Authentication
 
 # 📂 Project Structure
 
-```
+```text
 VyaparKitaab
 │
 ├── frontend/
@@ -168,13 +266,11 @@ VyaparKitaab
 │   └── core/
 │
 ├── ai/
-│
 ├── database/
-│
 ├── docker/
-│
 ├── docs/
-│
+│   ├── README.md
+│   └── SYNOPSIS.md
 ├── .github/
 │   └── workflows/
 │
@@ -193,15 +289,22 @@ VyaparKitaab
 - [ ] Inventory management
 - [ ] Customer management
 - [ ] Invoice generation
-- [ ] Dashboard
+- [ ] Store dashboard
+- [ ] Customer dashboard
+- [ ] Transaction recording
 
 ---
 
-## Phase 2 — AI Integration
+## Phase 2 — Secure Payments & AI Integration
 
+- [ ] KYC application integration
+- [ ] OTP-based transaction authentication
+- [ ] Payment integration
+- [ ] Automated purchase notifications
 - [ ] Invoice OCR
 - [ ] Demand forecasting
 - [ ] AI business insights
+- [ ] Transaction classification
 - [ ] LLM assistant
 
 ---
@@ -218,6 +321,11 @@ VyaparKitaab
 ## Phase 4 — Future Enhancements
 
 - WhatsApp integration
+- Android application
+- Regional language support
+- Multi-store management
+- Supplier analytics
+- Advanced forecasting
 
 ---
 
@@ -240,11 +348,6 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ## Contributing
 
 See `CONTRIBUTING.md` for guidelines on setting up a development environment, coding style, and submitting pull requests.
-- Android application
-- Regional language support
-- Multi-store management
-- Supplier analytics
-- Advanced forecasting
 
 ---
 
@@ -303,4 +406,3 @@ docker-compose up --build
 ```
 
 Open `http://localhost:8000` to see the simple frontend and `http://localhost:8000/health` for the API health.
-
