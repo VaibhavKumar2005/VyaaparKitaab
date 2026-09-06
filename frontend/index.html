@@ -1,78 +1,16 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="VyaparKitaab is a simple MSME business notebook for invoices, bookkeeping, OCR, and dashboards."
+      content="VyaparKitaab is a cloud notebook for MSMEs with invoices, inventory, customers, and spending analytics."
     />
-    <title>VyaparKitaab — MSME Business Notebook</title>
-    <link rel="stylesheet" href="/static/style.css" />
+    <title>VyaparKitaab</title>
   </head>
   <body>
-    <main class="page-shell">
-      <section class="hero-card">
-        <div id="art-scene" aria-hidden="true"></div>
-        <div class="eyebrow">MSME Digital Notebook</div>
-        <h1>VyaparKitaab</h1>
-        <p class="lead">
-          A simple, explainable, and privacy-conscious business notebook for Indian MSMEs.
-          It helps manage invoices, customers, inventory, and OCR-based document scanning in one place.
-        </p>
-
-        <div class="hero-grid">
-          <article class="mini-card">
-            <span>Problem</span>
-            <p>Manual bookkeeping and scattered records make daily operations slow and error-prone.</p>
-          </article>
-          <article class="mini-card">
-            <span>Solution</span>
-            <p>A focused app for record management, document scanning, and business visibility.</p>
-          </article>
-          <article class="mini-card accent">
-            <span>Demo</span>
-            <p id="status">Checking backend health...</p>
-          </article>
-        </div>
-
-        <div class="actions">
-          <button id="healthBtn">Check backend health</button>
-          <a class="ghost-link" href="#showcase">See project highlights</a>
-        </div>
-      </section>
-
-      <section id="showcase" class="content-grid">
-        <article>
-          <h2>Why this project</h2>
-          <p>
-            It is intentionally small enough to explain in a presentation, but complete enough to
-            demonstrate real product thinking, backend APIs, data storage, OCR integration, and deployment.
-          </p>
-        </article>
-
-        <article>
-          <h2>Core modules</h2>
-          <ul>
-            <li>Login and role-based access</li>
-            <li>Customer and supplier records</li>
-            <li>Invoice and tax document scanning</li>
-            <li>Inventory tracking and reporting</li>
-          </ul>
-        </article>
-
-        <article>
-          <h2>Tech stack</h2>
-          <ul>
-            <li>React + HTML/CSS for the interface</li>
-            <li>FastAPI for the backend</li>
-            <li>PostgreSQL for data storage</li>
-            <li>PyTorch, OCR, and data tools for AI features</li>
-          </ul>
-        </article>
-      </section>
-    </main>
-
-    <script type="module" src="/static/app.js"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

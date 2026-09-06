@@ -34,6 +34,12 @@ variable "postgres_admin_password" {
   sensitive   = true
 }
 
+variable "secret_key" {
+  description = "Application secret key stored in Key Vault."
+  type        = string
+  sensitive   = true
+}
+
 variable "container_cpu" {
   description = "CPU units for the backend container app."
   type        = number

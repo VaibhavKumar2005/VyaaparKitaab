@@ -1,6 +1,11 @@
-fastapi
+fastapi>=0.116
 uvicorn[standard]
-pydantic
-sqlalchemy
-psycopg2-binary
+pydantic[email]>=2
+pydantic-settings
+sqlalchemy[asyncio]>=2
+asyncpg
+alembic
+python-jose[cryptography]
+passlib[bcrypt]
 python-dotenv
+httpx
