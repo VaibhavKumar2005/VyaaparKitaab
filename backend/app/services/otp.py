@@ -1,7 +1,7 @@
 import hashlib
 import hmac
 import logging
-import random
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 def generate_otp() -> str:
-    return f"{random.randint(0, 999999):06d}"
+    # Use a cryptographically secure RNG for OTPs
+    return f"{secrets.randbelow(1_000_000):06d}"
 
 
 def hash_otp(otp: str) -> str:
@@ -24,6 +25,7 @@ def verify_otp(otp: str, otp_hash: str) -> bool:
 
 
 async def store_otp(db: AsyncSession, phone: str, purpose: str, otp: str) -> OTPVerification:
+    # Store OTP as a hashed value in DB (short-lived). Later we can move this to Redis.
     verification = OTPVerification(
         phone=phone,
         otp_hash=hash_otp(otp),

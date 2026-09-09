@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timezone
 
 from app.cores.database import get_db
 from app.models.user import User
+from app.models.transaction import OTPVerification
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
 from app.services.auth import create_access_token, hash_password, verify_password
 from app.services.otp import generate_otp, send_otp_sms, store_otp, verify_otp
@@ -48,7 +50,26 @@ async def send_otp(phone: str, purpose: str = "TRANSACTION", db: AsyncSession = 
 
 
 @router.post("/otp/verify")
-async def verify_otp_endpoint(phone: str, otp: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.phone == phone))
-    user = result.scalar_one_or_none()
-    return {"verified": bool(user), "message": "OTP verification endpoint ready"}
+async def verify_otp_endpoint(phone: str, otp: str, purpose: str = "TRANSACTION", db: AsyncSession = Depends(get_db)):
+    # Find the most recent unused OTP for this phone+purpose that hasn't expired
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(OTPVerification)
+        .where(
+            OTPVerification.phone == phone,
+            OTPVerification.purpose == purpose,
+            OTPVerification.used == False,
+            OTPVerification.expires_at > now,
+        )
+        .order_by(OTPVerification.created_at.desc())
+    )
+    verification = result.scalars().first()
+    if not verification:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP")
+
+    if verify_otp(otp, verification.otp_hash):
+        verification.used = True
+        await db.commit()
+        return {"verified": True, "message": "OTP verified"}
+
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OTP")
