@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../lib/api';
+import { getAccessToken, setAccessToken, clearAccessToken } from '../lib/tokenStore';
 
 type AuthUser = {
   email: string;
@@ -17,11 +18,9 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>;
   register: (payload: { email: string; password: string; full_name?: string; phone?: string }) => Promise<void>;
   logout: () => void;
-  refreshToken: () => Promise<string | null>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
-let memoryToken: string | null = null;
 
 function decodeToken(token: string): AuthUser | null {
   try {
@@ -39,36 +38,45 @@ function decodeToken(token: string): AuthUser | null {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [token, setToken] = useState<string | null>(memoryToken);
-  const [user, setUser] = useState<AuthUser | null>(memoryToken ? decodeToken(memoryToken) : null);
+  const [tokenState, setTokenState] = useState<string | null>(getAccessToken());
+  const [user, setUser] = useState<AuthUser | null>(tokenState ? decodeToken(tokenState) : null);
 
   useEffect(() => {
-    memoryToken = token;
-    setUser(token ? decodeToken(token) : null);
-  }, [token]);
+    setAccessTokenInState(tokenState);
+    setUser(tokenState ? decodeToken(tokenState) : null);
+  }, [tokenState]);
+
+  function setAccessTokenInState(t: string | null) {
+    setAccessToken(t);
+    setTokenState(t);
+  }
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      token,
+      token: tokenState,
       user,
       login: async (email, password) => {
         const response = await apiFetch<AuthResponse>('/auth/login', {
           method: 'POST',
           body: JSON.stringify({ email, password }),
         });
-        setToken(response.access_token);
+        setAccessTokenInState(response.access_token);
       },
       register: async (payload) => {
         const response = await apiFetch<AuthResponse>('/auth/register', {
           method: 'POST',
           body: JSON.stringify(payload),
         });
-        setToken(response.access_token);
+        setAccessTokenInState(response.access_token);
       },
-      logout: () => setToken(null),
-      refreshToken: async () => token,
+      logout: () => {
+        // clear local token; call backend to revoke cookie asynchronously
+        clearAccessToken();
+        setTokenState(null);
+        fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+      },
     }),
-    [token, user],
+    [tokenState, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
