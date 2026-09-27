@@ -13,3 +13,5 @@ def test_health_endpoint() -> None:
     response = client.get('/api/v1/health')
     assert response.status_code == 200
     assert response.json() == {'status': 'healthy'}
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    assert 'content-security-policy' in response.headers

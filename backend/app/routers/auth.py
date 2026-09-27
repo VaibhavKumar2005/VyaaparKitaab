@@ -40,7 +40,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     await db.commit()
     await db.refresh(user)
     # create refresh token and set as httpOnly cookie
-    access = create_access_token(str(user.id))
+    access = create_access_token(str(user.id), user.role)
     raw_refresh = generate_refresh_token()
     await store_refresh_token(db, str(user.id), raw_refresh)
     res = TokenResponse(access_token=access)
@@ -64,7 +64,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     user = result.scalar_one_or_none()
     if not user or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    access = create_access_token(str(user.id))
+    access = create_access_token(str(user.id), user.role)
     raw_refresh = generate_refresh_token()
     await store_refresh_token(db, str(user.id), raw_refresh)
     res = TokenResponse(access_token=access)
@@ -100,7 +100,11 @@ async def refresh_token(request: Request, db: AsyncSession = Depends(get_db)):
     data = await verify_and_rotate_refresh_token(db, raw)
     if not data:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-    access = create_access_token(data["user_id"])
+    user_result = await db.execute(select(User).where(User.id == data["user_id"]))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    access = create_access_token(data["user_id"], user.role)
     # set rotated refresh token cookie
     response = TokenResponse(access_token=access)
     resp = Response(content=response.json(), media_type="application/json")

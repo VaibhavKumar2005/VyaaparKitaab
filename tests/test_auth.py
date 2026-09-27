@@ -4,8 +4,10 @@ os.environ.setdefault('DATABASE_URL', 'postgresql://postgres:postgres@localhost:
 os.environ.setdefault('ENV', 'testing')
 
 from fastapi.testclient import TestClient
+from jose import jwt
 from sqlalchemy import select
 
+from app.cores.config import settings
 from app.cores.database import get_db
 from app.main import app
 from app.models.user import User
@@ -77,3 +79,5 @@ def test_register_login_happy_path() -> None:
         json={'email': 'owner@example.com', 'password': 'Password123!'},
     )
     assert login_response.status_code == 200
+    payload = jwt.decode(login_response.json()['access_token'], settings.SECRET_KEY, algorithms=['HS256'])
+    assert payload['role'] == 'STORE_OWNER'

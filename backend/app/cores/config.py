@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = Field(default="change-me")
     ENV: str = Field(default="development")
     ALLOWED_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=60)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30)
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
