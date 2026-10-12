@@ -16,7 +16,7 @@ export function CustomerDashboard() {
   const [summary, setSummary] = useState<CustomerSummary | null>(null);
 
   useEffect(() => {
-    void apiFetch<CustomerSummary>('/dashboard/customer/demo').then(setSummary).catch(() => setSummary(null));
+    void apiFetch<CustomerSummary>('/dashboard/customer/me').then(setSummary).catch(() => setSummary(null));
   }, [token]);
 
   const chartData = Object.entries(summary?.summary ?? {}).map(([name, value]) => ({

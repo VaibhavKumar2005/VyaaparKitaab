@@ -1,7 +1,7 @@
 from datetime import datetime, date
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class InvoiceItemCreate(BaseModel):
@@ -23,7 +23,7 @@ class InvoiceCreate(BaseModel):
     total_amount: float = 0
     paid_amount: float = 0
     payment_method: str | None = None
-    items: list[InvoiceItemCreate] = []
+    items: list[InvoiceItemCreate] = Field(default_factory=list)
 
 
 class InvoiceItemRead(InvoiceItemCreate):
@@ -45,7 +45,7 @@ class InvoiceRead(BaseModel):
     paid_amount: float
     payment_method: str | None
     created_at: datetime
-    items: list[InvoiceItemRead] = []
+    items: list[InvoiceItemRead] = Field(default_factory=list)
 
 
 class SpendingSummary(BaseModel):

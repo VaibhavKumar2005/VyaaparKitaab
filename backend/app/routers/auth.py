@@ -44,7 +44,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     raw_refresh = generate_refresh_token()
     await store_refresh_token(db, str(user.id), raw_refresh)
     res = TokenResponse(access_token=access)
-    response = Response(content=res.json(), media_type="application/json")
+    response = Response(content=res.model_dump_json(), media_type="application/json")
     secure = settings.ENV.lower() != "development"
     response.set_cookie(
         key="refresh",
@@ -68,7 +68,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     raw_refresh = generate_refresh_token()
     await store_refresh_token(db, str(user.id), raw_refresh)
     res = TokenResponse(access_token=access)
-    response = Response(content=res.json(), media_type="application/json")
+    response = Response(content=res.model_dump_json(), media_type="application/json")
     secure = settings.ENV.lower() != "development"
     response.set_cookie(
         key="refresh",
@@ -107,7 +107,7 @@ async def refresh_token(request: Request, db: AsyncSession = Depends(get_db)):
     access = create_access_token(data["user_id"], user.role)
     # set rotated refresh token cookie
     response = TokenResponse(access_token=access)
-    resp = Response(content=response.json(), media_type="application/json")
+    resp = Response(content=response.model_dump_json(), media_type="application/json")
     secure = settings.ENV.lower() != "development"
     resp.set_cookie(
         key="refresh",
