@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VyaaparKitaab — Architecture Review</title>
+<style>
+  :root {
+    --ink: #1a1a2e;
+    --paper: #f7f6f2;
+    --accent: #2563eb;
+    --accent-light: #dbeafe;
+    --warn: #dc2626;
+    --warn-light: #fee2e2;
+    --ok: #16a34a;
+    --ok-light: #dcfce7;
+    --muted: #64748b;
+    --border: #e2e8f0;
+    --code-bg: #1e293b;
+    --code-fg: #e2e8f0;
+    --section-pad: 2.5rem;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 16px;
+    line-height: 1.75;
+  }
+  /* ── HEADER ── */
+  header {
+    background: var(--ink);
+    color: #f7f6f2;
+    padding: 3rem 2rem 2.5rem;
+    text-align: center;
+  }
+  header .kicker {
+    font-family: 'Courier New', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.12em;
+    color: #93c5fd;
+    margin-bottom: 0.75rem;
+  }
+  header h1 {
+    font-size: clamp(1.8rem, 5vw, 3.2rem);
+    font-weight: 700;
+    line-height: 1.1;
+    margin-bottom: 0.5rem;
+  }
+  header .sub {
+    color: #94a3b8;
+    font-size: 1rem;
+    font-style: italic;
+  }
+  /* ── NAV ── */
+  nav {
+    background: #0f172a;
+    padding: 0.75rem 2rem;
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  nav a {
+    color: #93c5fd;
+    text-decoration: none;
+    font-family: 'Courier New', monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+  nav a:hover { color: #fff; }
+  /* ── LAYOUT ── */
+  .container { max-width: 940px; margin: 0 auto; padding: 0 1.5rem; }
+  section { padding: var(--section-pad) 0; border-bottom: 1px solid var(--border); }
+  section:last-child { border-bottom: none; }
+  h2 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--accent);
+    color: var(--ink);
+  }
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 1.75rem 0 0.75rem;
+    color: var(--accent);
+  }
+  h4 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 1.25rem 0 0.5rem;
+    color: var(--ink);
+  }
+  p { margin-bottom: 1rem; }
+  /* ── CALLOUTS ── */
+  .callout {
+    border-left: 4px solid;
+    padding: 0.85rem 1.1rem;
+    margin: 1.25rem 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 0.95rem;
+  }
+  .callout.critical { border-color: var(--warn); background: var(--warn-light); }
+  .callout.good    { border-color: var(--ok);   background: var(--ok-light); }
+  .callout.info    { border-color: var(--accent); background: var(--accent-light); }
+  .callout strong  { display: block; margin-bottom: 0.25rem; font-family: 'Courier New', monospace; font-size: 0.85rem; }
+  /* ── CODE BLOCKS ── */
+  pre {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    padding: 1.2rem 1.4rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    line-height: 1.55;
+    margin: 1rem 0 1.5rem;
+    font-family: 'Courier New', monospace;
+  }
+  code {
+    font-family: 'Courier New', monospace;
+    background: #e2e8f0;
+    color: #1e293b;
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+    font-size: 0.88em;
+  }
+  pre code { background: none; color: inherit; padding: 0; border-radius: 0; font-size: inherit; }
+  /* ── TABLES ── */
+  .tbl-wrap { overflow-x: auto; margin: 1.25rem 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  th {
+    background: var(--ink);
+    color: #f7f6f2;
+    padding: 0.65rem 0.9rem;
+    text-align: left;
+    font-family: 'Courier New', monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.05em;
+  }
+  td { padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:nth-child(even) td { background: #f1f5f9; }
+  .badge {
+    display: inline-block;
+    padding: 0.15em 0.6em;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-family: 'Courier New', monospace;
+    font-weight: 700;
+  }
+  .badge.red    { background: var(--warn-light); color: var(--warn); }
+  .badge.green  { background: var(--ok-light);   color: var(--ok); }
+  .badge.blue   { background: var(--accent-light); color: var(--accent); }
+  .badge.gray   { background: #f1f5f9; color: var(--muted); }
+  /* ── DIAGRAM BOXES ── */
+  .diagram {
+    background: var(--code-bg);
+    color: #94a3b8;
+    padding: 1.5rem;
+    border-radius: 8px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    overflow-x: auto;
+    margin: 1.25rem 0 1.75rem;
+    white-space: pre;
+  }
+  .diagram .highlight { color: #7dd3fc; }
+  .diagram .ok-line   { color: #86efac; }
+  .diagram .warn-line { color: #fca5a5; }
+  .diagram .new-line  { color: #fde68a; }
+  /* ── CHANGE LIST ── */
+  .change-list { list-style: none; padding: 0; }
+  .change-list li {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.65rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.93rem;
+  }
+  .change-list li:last-child { border-bottom: none; }
+  .ci { flex-shrink: 0; width: 1.6rem; height: 1.6rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 900; }
+  .ci.crit  { background: var(--warn-light); color: var(--warn); }
+  .ci.add   { background: var(--ok-light);   color: var(--ok); }
+  .ci.impr  { background: var(--accent-light); color: var(--accent); }
+  /* ── SUMMARY BANNER ── */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+  }
+  .stat-box {
+    border: 1px solid var(--border);
+    padding: 1.1rem 1.2rem;
+    border-radius: 8px;
+    background: #fff;
+  }
+  .stat-box .num {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--accent);
+    font-family: 'Courier New', monospace;
+  }
+  .stat-box .lbl { font-size: 0.82rem; color: var(--muted); margin-top: 0.1rem; }
+  /* ── PHASE BLOCKS ── */
+  .phase {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.4rem;
+    margin: 1rem 0;
+    background: #fff;
+  }
+  .phase-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .phase-num {
+    background: var(--ink);
+    color: #fff;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Courier New', monospace;
+    font-weight: 700;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+  }
+  .phase-title { font-weight: 700; font-size: 1rem; }
+  .phase ul { list-style: disc; padding-left: 1.3rem; font-size: 0.9rem; }
+  .phase li { margin-bottom: 0.25rem; }
+  footer {
+    background: var(--ink);
+    color: #94a3b8;
+    text-align: center;
+    padding: 2rem;
+    font-family: 'Courier New', monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.05em;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="kicker">Architecture Review — VyaaparKitaab v0.1.0</div>
+  <h1>From Working Prototype<br>to Production-Grade Platform</h1>
+  <div class="sub">High-Level Design · Low-Level Design · Improvement Roadmap</div>
+</header>
+
+<nav>
+  <a href="#summary">Summary</a>
+  <a href="#current">Current State</a>
+  <a href="#hld">HLD</a>
+  <a href="#lld">LLD</a>
+  <a href="#changes">Changes</a>
+  <a href="#backend">Backend</a>
+  <a href="#frontend">Frontend</a>
+  <a href="#infra">Infra & DevOps</a>
+  <a href="#ai">AI Layer</a>
+  <a href="#phasing">Phasing</a>
+</nav>
+
+<!-- ─────────── SUMMARY ─────────── -->
+<section id="summary">
+<div class="container">
+<h2>Executive Summary</h2>
+<p>VyaaparKitaab has a <strong>solid MVP skeleton</strong> — async FastAPI, SQLAlchemy 2.0, Alembic, clean model definitions, and working Docker compose. But the codebase has six critical gaps that will cause failures in production before it even reaches real users. This document details every gap with exact fixes, then presents the complete HLD and LLD for the mature system.</p>
+<div class="summary-grid">
+  <div class="stat-box"><div class="num">6</div><div class="lbl">Critical security/stability bugs (fix now)</div></div>
+  <div class="stat-box"><div class="num">11</div><div class="lbl">Architecture improvements needed</div></div>
+  <div class="stat-box"><div class="num">4</div><div class="lbl">Missing layers (cache, queue, events, AI)</div></div>
+  <div class="stat-box"><div class="num">3</div><div class="lbl">Deployment gaps on OCI</div></div>
+</div>
+
+<div class="callout good">
+  <strong>✅ WHAT'S ALREADY GOOD</strong>
+  Async SQLAlchemy with asyncpg · Pydantic v2 Settings · UUID primary keys · Alembic migrations · bcrypt password hashing · CORS middleware · Multi-stage Dockerfile · GitHub Actions CI · Health check endpoint
+</div>
+</div>
+</section>
+
+<!-- ─────────── CURRENT STATE ─────────── -->
+<section id="current">
+<div class="container">
+<h2>Current Architecture — What's Actually There</h2>
+
+<div class="diagram">┌─────────────────────────────────────────────────────────────┐
+│              <span class="warn-line">CURRENT STATE (MVP skeleton)</span>                       │
+└─────────────────────────────────────────────────────────────┘
+
+  React (Vite + TypeScript)          FastAPI Backend
+  ┌─────────────────────┐            ┌──────────────────────────┐
+  │ LandingPage          │           │ /api/v1/auth             │
+  │ LoginPage            │  HTTP     │ /api/v1/business         │
+  │ RegisterPage         │──────────▶│ /api/v1/invoices         │
+  │ StoreDashboard       │           │ /api/v1/dashboard/store  │
+  │ CustomerDashboard    │           │ /api/v1/dashboard/cust.  │
+  └─────────────────────┘           └──────────┬───────────────┘
+                                               │ asyncpg
+                                    ┌──────────▼───────────────┐
+                                    │  PostgreSQL 15 (Docker)   │
+                                    │  users / businesses       │
+                                    │  customers / products     │
+                                    │  invoices / invoice_items │
+                                    │  otp_verifications        │
+                                    └───────────────────────────┘
+
+<span class="warn-line">MISSING:</span> Redis · Celery · Object Storage · Nginx · Refresh Tokens
+         Rate Limiting · Business-scoped queries · AI services
+         Monitoring · Secrets management</div>
+
+<h3>Critical Bugs Found in Code</h3>
+
+<div class="callout critical">
+  <strong>🔴 BUG 1 — OTP verify endpoint does not actually verify the OTP</strong>
+  <code>routers/auth.py:verify_otp_endpoint</code> checks if a user with that phone exists, not whether the OTP matches. Any phone in the DB passes verification regardless of OTP value.
+</div>
+
+<div class="callout critical">
+  <strong>🔴 BUG 2 — No business-scoping on invoice/dashboard queries</strong>
+  <code>routers/transactions.py:list_invoices</code> returns ALL invoices for ALL businesses. Store owner A can read store owner B's data.
+</div>
+
+<div class="callout critical">
+  <strong>🔴 BUG 3 — OTP uses random.randint (not cryptographically secure)</strong>
+  <code>services/otp.py:generate_otp</code> uses <code>random</code>, not <code>secrets</code>. An attacker can predict OTPs by observing timing patterns.
+</div>
+
+<div class="callout critical">
+  <strong>🔴 BUG 4 — No refresh token; all sessions expire silently</strong>
+  <code>ACCESS_TOKEN_EXPIRE_MINUTES=60</code> with no refresh flow means every user gets hard-logged-out every hour. No rotation, no revocation.
+</div>
+
+<div class="callout critical">
+  <strong>🔴 BUG 5 — Alembic uses synchronous engine on an async schema</strong>
+  <code>alembic/env.py</code> uses <code>engine_from_config</code> (sync) while the app uses <code>create_async_engine</code>. Migrations will fail on <code>postgresql+asyncpg://</code> URLs.
+</div>
+
+<div class="callout critical">
+  <strong>🔴 BUG 6 — spending.classify_transaction uses invoice_number as category hint</strong>
+  <code>services/spending.py</code> tries to classify categories from <code>invoice.invoice_number</code> (e.g. "INV-001"). Business-generated invoice numbers contain no product keyword. Classification will always return "Other".
+</div>
+</div>
+</section>
+
+<!-- ─────────── HLD ─────────── -->
+<section id="hld">
+<div class="container">
+<h2>High-Level Design (HLD)</h2>
+<p>The target architecture separates concerns into six clear layers. Each layer communicates only downward or through the async event bus.</p>
+
+<div class="diagram">┌──────────────────────────────────────────────────────────────────────┐
+│                    <span class="highlight">HIGH-LEVEL DESIGN — VyaaparKitaab</span>               │
+└──────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                    CLIENT LAYER                                  │
+  │  React SPA (Vite)                                               │
+  │  ┌──────────────────────┐  ┌──────────────────────────────────┐│
+  │  │ Dashboard B (Store)  │  │    Dashboard C (Customer)        ││
+  │  │ - Inventory          │  │ - Spending by category           ││
+  │  │ - Invoices           │  │ - Purchase history               ││
+  │  │ - Analytics          │  │ - Discount tracker               ││
+  │  └──────────────────────┘  └──────────────────────────────────┘│
+  └──────────────────────────────────┬──────────────────────────────┘
+                                     │ HTTPS
+  ┌──────────────────────────────────▼──────────────────────────────┐
+  │                    GATEWAY LAYER                                 │
+  │  Nginx (reverse proxy + TLS termination + static files)         │
+  │  Rate limiter (nginx-limit-req or Kong) · CORS                  │
+  └──────────────────────────────────┬──────────────────────────────┘
+                                     │
+  ┌──────────────────────────────────▼──────────────────────────────┐
+  │                    API LAYER                                     │
+  │  FastAPI (Gunicorn + Uvicorn workers)                           │
+  │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌─────────────┐ │
+  │  │ auth       │ │ business   │ │transaction │ │ ai/nlp      │ │
+  │  │ /register  │ │ /customers │ │ /invoices  │ │ /chat       │ │
+  │  │ /login     │ │ /products  │ │ /payments  │ │ /classify   │ │
+  │  │ /refresh   │ │ /suppliers │ │ /otp       │ │ /forecast   │ │
+  │  └────────────┘ └────────────┘ └────────────┘ └─────────────┘ │
+  └──────┬───────────────────────┬──────────────────────────────────┘
+         │                       │
+  ┌──────▼──────────┐   ┌────────▼────────────────────────────────┐
+  │  CACHE LAYER    │   │         TASK QUEUE LAYER                 │
+  │  Redis 7        │   │  Celery + Redis broker                   │
+  │  - Sessions     │   │  Workers:                                │
+  │  - OTP store    │   │  - send_otp_sms (Fast2SMS)              │
+  │  - Rate limits  │   │  - send_invoice_email (SMTP)            │
+  │  - API cache    │   │  - classify_transaction (AI)            │
+  │  - Pub/Sub      │   │  - generate_pdf_invoice                 │
+  └──────┬──────────┘   │  - sync_to_data_lake                   │
+         │              └────────────────────┬────────────────────┘
+  ┌──────▼─────────────────────────────────────────────────────────┐
+  │                 DATA LAYER                                       │
+  │  ┌──────────────────────┐  ┌──────────────────────────────────┐│
+  │  │  PostgreSQL 17        │  │   OCI Object Storage (S3 compat) ││
+  │  │  (OCI Managed DB or  │  │   - Invoice PDFs                 ││
+  │  │   self-hosted ARM VM) │  │   - OCR uploads                  ││
+  │  │  + RLS policies       │  │   - Profile photos               ││
+  │  └──────────────────────┘  └──────────────────────────────────┘│
+  └────────────────────────────────────────────────────────────────┘
+                                     │
+  ┌──────────────────────────────────▼──────────────────────────────┐
+  │                 AI/ML LAYER (Phase 2)                            │
+  │  ┌─────────────────┐  ┌──────────────┐  ┌─────────────────────┐│
+  │  │ LLM API          │  │ OCR Service  │  │ Forecasting Model   ││
+  │  │ (OpenAI/Gemini)  │  │ (Tesseract/  │  │ (scikit-learn /     ││
+  │  │ NL business Q&A  │  │  Mistral)    │  │  Prophet)           ││
+  │  └─────────────────┘  └──────────────┘  └─────────────────────┘│
+  └────────────────────────────────────────────────────────────────┘
+                                     │
+  ┌──────────────────────────────────▼──────────────────────────────┐
+  │                 OBSERVABILITY (Phase 3)                          │
+  │  Prometheus (metrics) · Grafana (dashboards)                    │
+  │  Loki (log aggregation) · Sentry (error tracking)               │
+  └────────────────────────────────────────────────────────────────┘</div>
+
+<h3>Data Flow: Transaction (the core loop)</h3>
+<div class="diagram">Customer at Store
+       │
+       ▼
+Store Dashboard (B) — clicks "New Invoice"
+       │ 1. POST /invoices  (draft)
+       ▼
+FastAPI (validates + writes Invoice DRAFT → PostgreSQL)
+       │ 2. POST /auth/otp/send  (customer's phone)
+       ▼
+Celery Worker ──► Fast2SMS ──► Customer receives OTP
+       │
+Customer enters OTP
+       │ 3. POST /auth/otp/verify
+       ▼
+FastAPI verifies OTP hash in Redis (not DB)
+       │ 4. PATCH /invoices/{id}/status  →  CONFIRMED
+       ▼
+PostgreSQL: Invoice.status = CONFIRMED, paid_amount set
+       │ (async)
+       ▼
+Celery: send_email_receipt.delay(invoice_id)
+       │        └──► SMTP → customer email
+       │
+       ▼
+Customer Dashboard (C) — sees updated purchase history
+                          + category classification updates</div>
+
+<h3>Multi-Tenancy Model</h3>
+<p>VyaaparKitaab is a <strong>multi-tenant SaaS</strong>. Each business is a tenant. The correct isolation model for this stage is <strong>row-level isolation via <code>business_id</code></strong> enforced in all service queries plus PostgreSQL RLS policies as a backstop. Schema-per-tenant adds complexity without benefit at this scale.</p>
+</div>
+</section>
+
+<!-- ─────────── LLD ─────────── -->
+<section id="lld">
+<div class="container">
+<h2>Low-Level Design (LLD)</h2>
+
+<h3>1. Revised Project Structure</h3>
+<pre><code>VyaaparKitaab/
+├── backend/
+│   ├── app/
+│   │   ├── main.py                  # app factory, lifespan, middleware
+│   │   ├── cores/
+│   │   │   ├── config.py            # Pydantic Settings
+│   │   │   ├── database.py          # async engine + session factory
+│   │   │   ├── redis.py             # Redis connection pool  ← NEW
+│   │   │   ├── security.py          # JWT, bcrypt            ← NEW (split from auth service)
+│   │   │   └── exceptions.py
+│   │   ├── dependencies/            # ← NEW folder
+│   │   │   ├── auth.py              # get_current_user, require_role
+│   │   │   └── business.py          # get_current_business (tenant scope)
+│   │   ├── middleware/              # ← NEW folder
+│   │   │   ├── rate_limit.py        # sliding window via Redis
+│   │   │   └── tenant.py            # inject business_id into request state
+│   │   ├── models/
+│   │   │   ├── user.py              # + refresh_tokens table
+│   │   │   ├── business.py
+│   │   │   └── transaction.py       # + SpendingCategory table ← NEW
+│   │   ├── schemas/
+│   │   ├── routers/
+│   │   │   ├── auth.py              # register/login/refresh/otp
+│   │   │   ├── business.py          # CRUD scoped to business_id
+│   │   │   ├── transactions.py      # CRUD scoped to business_id
+│   │   │   ├── customers.py         # customer-facing routes  ← NEW
+│   │   │   └── health.py
+│   │   ├── services/
+│   │   │   ├── auth.py
+│   │   │   ├── otp.py               # fixed to use secrets module + Redis
+│   │   │   ├── spending.py          # fixed to use SpendingCategory model
+│   │   │   ├── invoice_pdf.py       # ← NEW (WeasyPrint/ReportLab)
+│   │   │   └── notifications.py     # ← NEW (email + SMS wrappers)
+│   │   └── workers/                 # ← NEW (Celery tasks)
+│   │       ├── celery_app.py
+│   │       ├── tasks_notify.py      # send_otp_sms, send_invoice_email
+│   │       └── tasks_ai.py          # classify_transaction, forecast
+│   ├── alembic/
+│   └── requirements.txt
+├── frontend/
+├── infra/
+│   └── terraform/                   # OCI resources
+├── docker/
+│   ├── Dockerfile                   # backend
+│   ├── Dockerfile.worker            # Celery worker  ← NEW
+│   └── nginx.conf                   # ← NEW
+└── docker-compose.yml               # extended with redis + worker</code></pre>
+
+<h3>2. Database Schema — New &amp; Changed Tables</h3>
+
+<pre><code>-- NEW: refresh_tokens
+CREATE TABLE refresh_tokens (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash  VARCHAR(255) NOT NULL UNIQUE,  -- SHA-256 of the raw token
+    expires_at  TIMESTAMPTZ NOT NULL,
+    revoked     BOOLEAN DEFAULT FALSE,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);
+
+-- NEW: spending_categories (hierarchical)
+CREATE TABLE spending_categories (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        VARCHAR(100) NOT NULL,
+    parent_id   UUID REFERENCES spending_categories(id),
+    slug        VARCHAR(100) UNIQUE NOT NULL  -- 'food', 'food.grocery'
+);
+
+-- CHANGE: invoice_items — add category FK
+ALTER TABLE invoice_items
+    ADD COLUMN category_id UUID REFERENCES spending_categories(id);
+
+-- NEW: stores OTP in Redis, not Postgres.
+-- Remove otp_verifications table (or keep for audit log only).
+-- Redis key format: "otp:{phone}:{purpose}" → { hash, expires }
+
+-- CHANGE: products — add category for classification
+ALTER TABLE products
+    ADD COLUMN category_id UUID REFERENCES spending_categories(id);
+
+-- PostgreSQL Row-Level Security (backstop)
+ALTER TABLE businesses   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customers    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_items ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY business_isolation ON invoices
+    USING (business_id = current_setting('app.business_id')::uuid);</code></pre>
+
+<h3>3. Fixed: OTP Service</h3>
+<pre><code># services/otp.py — FIXED VERSION
+import secrets, hashlib, json
+from datetime import timedelta
+from redis.asyncio import Redis
+
+OTP_TTL_SECONDS = 300  # 5 minutes
+
+def generate_otp() -> str:
+    # secrets.randbelow is cryptographically secure (unlike random.randint)
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+def _hash_otp(otp: str) -> str:
+    return hashlib.sha256(otp.encode()).hexdigest()
+
+async def store_otp(redis: Redis, phone: str, purpose: str, otp: str) -> None:
+    key = f"otp:{phone}:{purpose}"
+    await redis.setex(key, OTP_TTL_SECONDS, _hash_otp(otp))
+
+async def verify_otp(redis: Redis, phone: str, purpose: str, otp: str) -> bool:
+    key = f"otp:{phone}:{purpose}"
+    stored_hash = await redis.get(key)
+    if not stored_hash:
+        return False
+    ok = hmac.compare_digest(stored_hash, _hash_otp(otp))
+    if ok:
+        await redis.delete(key)  # OTP is one-time
+    return ok</code></pre>
+
+<h3>4. Fixed: Business-Scoped Queries</h3>
+<pre><code># dependencies/business.py — NEW
+from fastapi import Depends, HTTPException
+from sqlalchemy import select
+from app.cores.database import AsyncSession, get_db
+from app.models.business import Business
+from app.dependencies.auth import get_current_user
+
+async def get_current_business(
+    db: AsyncSession = Depends(get_db),
+    user = Depends(get_current_user)
+) -> Business:
+    result = await db.execute(
+        select(Business).where(Business.owner_id == user.id)
+    )
+    business = result.scalar_one_or_none()
+    if not business:
+        raise HTTPException(404, "Business not found for this user")
+    return business
+
+# routers/transactions.py — FIXED (scoped queries)
+@router.get("/invoices", response_model=list[InvoiceRead])
+async def list_invoices(
+    db: AsyncSession = Depends(get_db),
+    business: Business = Depends(get_current_business),  # ← tenant scope
+):
+    result = await db.execute(
+        select(Invoice).where(Invoice.business_id == business.id)  # ← filter!
+    )
+    return list(result.scalars().all())</code></pre>
+
+<h3>5. Refresh Token Flow</h3>
+<pre><code># POST /auth/login  →  returns BOTH tokens
+{
+  "access_token": "eyJ...",          # short-lived: 30 min
+  "refresh_token": "opaque-UUID...", # long-lived: 30 days, stored hashed in DB
+  "token_type": "bearer"
+}
+
+# POST /auth/refresh  →  rotate tokens
+# Client sends: Authorization: Bearer {refresh_token}
+# Server:
+#   1. Verify refresh_token_hash exists in refresh_tokens table
+#   2. Check not revoked, not expired
+#   3. Delete old refresh_token row (rotation — detects token theft)
+#   4. Issue new access_token + new refresh_token
+#   5. Store new refresh_token_hash
+
+# POST /auth/logout
+# Server: mark refresh_token as revoked = True</code></pre>
+
+<h3>6. Celery Worker Setup</h3>
+<pre><code># workers/celery_app.py
+from celery import Celery
+from app.cores.config import settings
+
+celery_app = Celery(
+    "vyaaparkitaab",
+    broker=settings.REDIS_URL,
+    backend=settings.REDIS_URL,
+    include=["app.workers.tasks_notify", "app.workers.tasks_ai"],
+)
+celery_app.conf.update(
+    task_serializer="json",
+    result_expires=3600,
+    timezone="Asia/Kolkata",
+)
+
+# workers/tasks_notify.py
+from .celery_app import celery_app
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_otp_sms_task(self, phone: str, otp: str):
+    try:
+        # Fast2SMS integration
+        import requests
+        resp = requests.post(
+            "https://www.fast2sms.com/dev/bulkV2",
+            headers={"authorization": settings.FAST2SMS_API_KEY},
+            json={"route": "otp", "variables_values": otp, "numbers": phone},
+            timeout=10
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
+@celery_app.task
+def send_invoice_email_task(invoice_id: str):
+    # Fetch invoice, generate PDF, send via SMTP
+    ...</code></pre>
+
+<h3>7. Rate Limiting Middleware</h3>
+<pre><code># middleware/rate_limit.py
+from fastapi import Request, HTTPException
+from redis.asyncio import Redis
+
+class SlidingWindowRateLimiter:
+    def __init__(self, redis: Redis, limit: int = 60, window: int = 60):
+        self.redis = redis
+        self.limit = limit
+        self.window = window
+
+    async def __call__(self, request: Request, call_next):
+        key = f"rl:{request.client.host}:{request.url.path}"
+        count = await self.redis.incr(key)
+        if count == 1:
+            await self.redis.expire(key, self.window)
+        if count > self.limit:
+            raise HTTPException(429, "Rate limit exceeded")
+        return await call_next(request)
+
+# Tighter limits for auth endpoints (brute force protection)
+# /auth/login       → 10 req/minute
+# /auth/otp/send    → 3 req/5-minutes per phone
+# /api/v1/*         → 120 req/minute</code></pre>
+
+<h3>8. Fixed: Alembic async env.py</h3>
+<pre><code># alembic/env.py — FIXED for asyncpg
+import asyncio
+from sqlalchemy.ext.asyncio import create_async_engine
+
+def run_migrations_online() -> None:
+    connectable = create_async_engine(settings.DATABASE_URL)
+
+    async def do_run():
+        async with connectable.connect() as conn:
+            await conn.run_sync(do_run_migrations)
+        await connectable.dispose()
+
+    def do_run_migrations(connection):
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+
+    asyncio.run(do_run())</code></pre>
+
+<h3>9. Transaction Classification — Correct Approach</h3>
+<pre><code># The bug: classifying from invoice_number ("INV-001" → "Other" always)
+# The fix: classify from the product's category, set when creating the product.
+
+# When creating a product, the store owner picks a category:
+# POST /products { name: "Amul Milk 500ml", category_id: "food.dairy" }
+
+# When creating invoice_items, category_id is inherited from product:
+# This means classification is always accurate and requires no AI in Phase 1.
+
+# In Phase 2, add an AI classifier for products without categories:
+@celery_app.task
+def classify_product_category(product_id: str):
+    product = fetch_product(product_id)
+    category = llm_classify(product.name)  # "Amul Milk" → "food.dairy"
+    update_product_category(product_id, category)</code></pre>
+
+<h3>10. Revised Docker Compose (production-ready)</h3>
+<pre><code>version: "3.9"
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: vyaapardb
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes: [db_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s; timeout: 5s; retries: 5
+
+  redis:                              # ← NEW
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+
+  backend:
+    build: { context: ., dockerfile: docker/Dockerfile }
+    command: gunicorn app.main:app -w 2 -k uvicorn.workers.UvicornWorker
+    env_file: .env
+    depends_on: { db: { condition: service_healthy }, redis: { condition: service_healthy } }
+
+  worker:                             # ← NEW
+    build: { context: ., dockerfile: docker/Dockerfile.worker }
+    command: celery -A app.workers.celery_app worker -l info -c 4
+    env_file: .env
+    depends_on: [backend, redis]
+
+  nginx:                              # ← NEW
+    image: nginx:alpine
+    ports: ["443:443", "80:80"]
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on: [backend]
+
+volumes: [db_data, redis_data]</code></pre>
+</div>
+</section>
+
+<!-- ─────────── ALL CHANGES ─────────── -->
+<section id="changes">
+<div class="container">
+<h2>Complete Change List</h2>
+<ul class="change-list">
+  <li><div class="ci crit">!</div><div><strong>Fix OTP verify endpoint</strong> — implement actual hash comparison against Redis key, not DB user existence check</div></li>
+  <li><div class="ci crit">!</div><div><strong>Fix business-scoped queries</strong> — all invoice/customer/product endpoints must filter by <code>business_id</code> from the authenticated user's business</div></li>
+  <li><div class="ci crit">!</div><div><strong>Fix OTP RNG</strong> — replace <code>random.randint</code> with <code>secrets.randbelow</code></div></li>
+  <li><div class="ci crit">!</div><div><strong>Fix Alembic env.py</strong> — use async engine; current sync engine breaks on asyncpg URL</div></li>
+  <li><div class="ci crit">!</div><div><strong>Fix spending classification</strong> — classify from <code>product.category_id</code>, not <code>invoice.invoice_number</code></div></li>
+  <li><div class="ci crit">!</div><div><strong>Add refresh token flow</strong> — short-lived access (30min) + long-lived refresh (30d) with hash storage and rotation</div></li>
+  <li><div class="ci add">+</div><div><strong>Add Redis service</strong> — OTP storage, rate limiting, Celery broker, API cache layer</div></li>
+  <li><div class="ci add">+</div><div><strong>Add Celery worker</strong> — async SMS/email tasks; OTP send should never block the HTTP response</div></li>
+  <li><div class="ci add">+</div><div><strong>Add Nginx reverse proxy</strong> — TLS termination, rate limiting, static file serving, upstream routing</div></li>
+  <li><div class="ci add">+</div><div><strong>Add rate limiting middleware</strong> — per-IP sliding window; tighter limits on auth routes</div></li>
+  <li><div class="ci add">+</div><div><strong>Add SpendingCategory model</strong> — hierarchical, seeded table; products and invoice_items reference it</div></li>
+  <li><div class="ci add">+</div><div><strong>Add PostgreSQL RLS policies</strong> — database-level backstop for tenant isolation</div></li>
+  <li><div class="ci add">+</div><div><strong>Add connection pooling config</strong> — <code>pool_size=10, max_overflow=20</code> on the async engine</div></li>
+  <li><div class="ci add">+</div><div><strong>Add OCI Object Storage</strong> — invoice PDFs, OCR uploads via <code>oci-python-sdk</code></div></li>
+  <li><div class="ci add">+</div><div><strong>Add <code>/customers</code> router</strong> — separate customer-facing API with customer role guard</div></li>
+  <li><div class="ci impr">~</div><div><strong>Move to Gunicorn + Uvicorn workers</strong> — replace bare <code>uvicorn</code> with <code>gunicorn -k UvicornWorker</code> for multi-core use</div></li>
+  <li><div class="ci impr">~</div><div><strong>Add <code>role</code> check to all routes</strong> — STORE_OWNER routes must reject CUSTOMER role and vice versa</div></li>
+  <li><div class="ci impr">~</div><div><strong>Move SECRET_KEY to secrets management</strong> — OCI Vault or GitHub Actions secrets; never in .env committed to repo</div></li>
+  <li><div class="ci impr">~</div><div><strong>Add structured logging</strong> — replace <code>logging.info</code> with structlog JSON output; forward to OCI Logging</div></li>
+  <li><div class="ci impr">~</div><div><strong>Add request ID middleware</strong> — every request gets <code>X-Request-ID</code> for tracing through Celery tasks</div></li>
+</ul>
+</div>
+</section>
+
+<!-- ─────────── BACKEND DEEP DIVE ─────────── -->
+<section id="backend">
+<div class="container">
+<h2>Backend — Layer by Layer</h2>
+
+<h3>FastAPI Router Architecture</h3>
+<div class="tbl-wrap">
+<table>
+  <tr><th>Router</th><th>Prefix</th><th>Auth Required</th><th>Role Guard</th><th>Status</th></tr>
+  <tr><td>health</td><td>/health</td><td>No</td><td>None</td><td><span class="badge green">EXISTS</span></td></tr>
+  <tr><td>auth</td><td>/auth</td><td>Partial</td><td>None</td><td><span class="badge red">FIX OTP</span></td></tr>
+  <tr><td>business</td><td>/business</td><td>Yes</td><td>STORE_OWNER</td><td><span class="badge green">EXISTS</span></td></tr>
+  <tr><td>transactions</td><td>/</td><td>Yes</td><td>STORE_OWNER</td><td><span class="badge red">ADD SCOPING</span></td></tr>
+  <tr><td>customers-api</td><td>/c</td><td>Yes</td><td>CUSTOMER</td><td><span class="badge gray">MISSING</span></td></tr>
+  <tr><td>ai</td><td>/ai</td><td>Yes</td><td>Any</td><td><span class="badge gray">Phase 2</span></td></tr>
+  <tr><td>admin</td><td>/admin</td><td>Yes</td><td>ADMIN</td><td><span class="badge gray">Phase 3</span></td></tr>
+</table>
+</div>
+
+<h3>Security Checklist</h3>
+<div class="tbl-wrap">
+<table>
+  <tr><th>Control</th><th>Current</th><th>Target</th></tr>
+  <tr><td>Password hashing</td><td><span class="badge green">bcrypt ✓</span></td><td>bcrypt, cost=12</td></tr>
+  <tr><td>JWT signing</td><td><span class="badge green">HS256 ✓</span></td><td>RS256 (asymmetric) for Phase 2</td></tr>
+  <tr><td>Refresh tokens</td><td><span class="badge red">Missing</span></td><td>Opaque + hashed, 30d, rotating</td></tr>
+  <tr><td>OTP generation</td><td><span class="badge red">random ✗</span></td><td>secrets.randbelow</td></tr>
+  <tr><td>OTP storage</td><td><span class="badge red">Plaintext in DB ✗</span></td><td>SHA-256 hash in Redis, 5min TTL</td></tr>
+  <tr><td>CORS</td><td><span class="badge green">Exists ✓</span></td><td>Restrict ALLOWED_ORIGINS in prod</td></tr>
+  <tr><td>Rate limiting</td><td><span class="badge red">None ✗</span></td><td>Redis sliding window middleware</td></tr>
+  <tr><td>HTTPS</td><td><span class="badge red">None in Docker ✗</span></td><td>Nginx + Let's Encrypt via certbot</td></tr>
+  <tr><td>Secrets</td><td><span class="badge red">.env hardcoded ✗</span></td><td>OCI Vault or GitHub Secrets</td></tr>
+  <tr><td>SQL injection</td><td><span class="badge green">SQLAlchemy ORM ✓</span></td><td>Parameterized queries enforced</td></tr>
+  <tr><td>Tenant isolation</td><td><span class="badge red">Missing ✗</span></td><td>business_id filter + RLS</td></tr>
+</table>
+</div>
+
+<h3>Database Optimization</h3>
+<pre><code># Missing indexes — add these migrations:
+CREATE INDEX CONCURRENTLY idx_invoices_business_created
+    ON invoices(business_id, created_at DESC);
+
+CREATE INDEX CONCURRENTLY idx_invoice_items_invoice
+    ON invoice_items(invoice_id);
+
+CREATE INDEX CONCURRENTLY idx_products_business_sku
+    ON products(business_id, sku);
+
+CREATE INDEX CONCURRENTLY idx_customers_business_phone
+    ON customers(business_id, phone);
+
+# Connection pool (add to database.py):
+engine = create_async_engine(
+    DATABASE_URL,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,       # verify connections before use
+    pool_recycle=3600,        # recycle after 1 hour
+    echo=False,
+)</code></pre>
+</div>
+</section>
+
+<!-- ─────────── FRONTEND ─────────── -->
+<section id="frontend">
+<div class="container">
+<h2>Frontend — Improvements Needed</h2>
+
+<h3>Current Issues</h3>
+<div class="callout critical">
+  <strong>No token refresh logic</strong> — <code>AuthContext.tsx</code> stores the access token but has no mechanism to call <code>/auth/refresh</code> when it expires. Users get silent 401s.
+</div>
+<div class="callout critical">
+  <strong>Token stored in localStorage (XSS risk)</strong> — access token should be in memory; refresh token in an httpOnly cookie.
+</div>
+
+<h3>Add: Axios Interceptor for Token Refresh</h3>
+<pre><code>// src/lib/api.ts — upgraded
+import axios from 'axios';
+
+const api = axios.create({ baseURL: '/api/v1' });
+
+// Attach access token from memory (not localStorage)
+api.interceptors.request.use(config => {
+  const token = tokenStore.getAccessToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+// Auto-refresh on 401
+api.interceptors.response.use(
+  res => res,
+  async err => {
+    if (err.response?.status === 401 && !err.config._retry) {
+      err.config._retry = true;
+      const { data } = await axios.post('/api/v1/auth/refresh', {}, { withCredentials: true });
+      tokenStore.setAccessToken(data.access_token);
+      return api(err.config);
+    }
+    return Promise.reject(err);
+  }
+);</code></pre>
+
+<h3>Missing Frontend Features</h3>
+<div class="tbl-wrap">
+<table>
+  <tr><th>Feature</th><th>Page</th><th>Status</th></tr>
+  <tr><td>OTP entry UI during checkout</td><td>InvoiceForm</td><td><span class="badge red">Missing</span></td></tr>
+  <tr><td>Customer spending chart (category breakdown)</td><td>CustomerDashboard</td><td><span class="badge red">Missing</span></td></tr>
+  <tr><td>PDF invoice download</td><td>InvoiceDetail</td><td><span class="badge red">Missing</span></td></tr>
+  <tr><td>Inventory low-stock alert</td><td>StoreDashboard</td><td><span class="badge red">Missing</span></td></tr>
+  <tr><td>Real-time dashboard (WebSocket or polling)</td><td>StoreDashboard</td><td><span class="badge gray">Phase 2</span></td></tr>
+  <tr><td>NL business assistant</td><td>Any</td><td><span class="badge gray">Phase 2</span></td></tr>
+</table>
+</div>
+</div>
+</section>
+
+<!-- ─────────── INFRA ─────────── -->
+<section id="infra">
+<div class="container">
+<h2>Infrastructure &amp; DevOps</h2>
+
+<h3>OCI Deployment Plan</h3>
+<p>OCI Always Free gives you 4 ARM OCPUs + 24 GB RAM across instances — more than enough for the entire Phase 1 stack at zero cost.</p>
+
+<div class="tbl-wrap">
+<table>
+  <tr><th>Component</th><th>OCI Resource</th><th>Spec</th></tr>
+  <tr><td>Backend + Nginx</td><td>Ampere A1 VM (instance-1)</td><td>2 OCPU / 12 GB</td></tr>
+  <tr><td>DB + Redis + Worker</td><td>Ampere A1 VM (instance-2)</td><td>2 OCPU / 12 GB</td></tr>
+  <tr><td>PostgreSQL</td><td>Self-hosted on instance-2 (or OCI DB for PostgreSQL)</td><td>—</td></tr>
+  <tr><td>Object Storage</td><td>OCI Object Storage</td><td>20 GB always free</td></tr>
+  <tr><td>Load Balancer</td><td>OCI Flexible LB</td><td>10 Mbps always free</td></tr>
+  <tr><td>DNS</td><td>OCI DNS or Cloudflare</td><td>Free</td></tr>
+</table>
+</div>
+
+<h3>GitHub Actions — Missing Pipelines</h3>
+<div class="callout critical">
+  <strong>CI runs tests but no database is spun up</strong> — the backend-ci.yml sets DATABASE_URL to a localhost PostgreSQL that doesn't exist in the runner. Tests will fail silently. Add a <code>services.postgres</code> block.
+</div>
+
+<pre><code># .github/workflows/backend-ci.yml — FIXED
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:                          # ← ADD THIS
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: vyaapardb_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 10s
+      redis:                             # ← ADD THIS
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost/vyaapardb_test
+      REDIS_URL: redis://localhost:6379
+      SECRET_KEY: ci-test-secret</code></pre>
+
+<h3>Terraform — What's Missing</h3>
+<p>The Terraform workflow references <code>infra/terraform/</code> but that directory doesn't exist in the repo. The CI validates and plans but there's nothing to apply. Add at minimum:</p>
+<pre><code># infra/terraform/main.tf — skeleton
+terraform {
+  required_providers {
+    oci = { source = "oracle/oci", version = "~> 5.0" }
+  }
+  backend "s3" {  # OCI Object Storage is S3-compatible
+    endpoint = "https://{namespace}.compat.objectstorage.{region}.oraclecloud.com"
+    ...
+  }
+}
+
+# Resources to define:
+# - oci_core_vcn (Virtual Cloud Network)
+# - oci_core_subnet (public + private)
+# - oci_core_instance × 2 (ARM Ampere A1)
+# - oci_load_balancer_load_balancer
+# - oci_objectstorage_bucket (for invoices, uploads)</code></pre>
+
+<h3>Monitoring Stack</h3>
+<pre><code># Add to docker-compose (Phase 3):
+  prometheus:
+    image: prom/prometheus:latest
+    volumes: [./infra/prometheus.yml:/etc/prometheus/prometheus.yml]
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:latest
+    ports: ["3001:3000"]
+    environment: { GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD}" }
+
+# FastAPI metrics endpoint (add to backend):
+pip install prometheus-fastapi-instrumentator
+
+from prometheus_fastapi_instrumentator import Instrumentator
+Instrumentator().instrument(app).expose(app)</code></pre>
+</div>
+</section>
+
+<!-- ─────────── AI LAYER ─────────── -->
+<section id="ai">
+<div class="container">
+<h2>AI Layer — Phase 2 Architecture</h2>
+
+<h3>What to Build &amp; How</h3>
+<div class="tbl-wrap">
+<table>
+  <tr><th>Feature</th><th>Approach</th><th>Tools</th><th>Where</th></tr>
+  <tr><td>Transaction classification</td><td>Product category (Phase 1) → LLM fallback (Phase 2)</td><td>GPT-4o-mini / Gemini Flash</td><td>Celery task</td></tr>
+  <tr><td>NL Business Q&amp;A</td><td>RAG over business data + LLM</td><td>LangChain + OpenAI</td><td>FastAPI /ai/chat</td></tr>
+  <tr><td>Invoice OCR</td><td>Image → text extraction → structured parse</td><td>Tesseract / Google Vision</td><td>Celery task</td></tr>
+  <tr><td>Demand forecasting</td><td>Time-series on product sales</td><td>Prophet / scikit-learn</td><td>Celery Beat (nightly)</td></tr>
+  <tr><td>Customer segmentation</td><td>K-means on spending patterns</td><td>scikit-learn</td><td>Celery Beat (weekly)</td></tr>
+  <tr><td>Anomaly detection</td><td>Z-score on daily revenue</td><td>numpy / scipy</td><td>Celery Beat (daily)</td></tr>
+</table>
+</div>
+
+<h3>NL Business Assistant — Data Flow</h3>
+<div class="diagram">User: "How much profit did I make this month?"
+       │
+       ▼
+POST /ai/chat  {query: "...", business_id: "uuid"}
+       │
+       ▼
+FastAPI → retrieves business context:
+  - Revenue: SUM(invoices WHERE type=SALE AND month=current)
+  - COGS:    SUM(invoice_items.quantity * products.cost_price)
+  - Top products, customer count, low stock
+       │
+       ▼
+LLM Prompt:
+  "You are the business advisor for {business.name}.
+   Here is today's data: {context_json}
+   User asks: {query}
+   Respond concisely in plain language."
+       │
+       ▼
+Response: "You made ₹42,500 in revenue this month with
+           estimated profit of ₹12,300 (29% margin).
+           Your top seller was Amul Milk."</div>
+</div>
+</section>
+
+<!-- ─────────── PHASING ─────────── -->
+<section id="phasing">
+<div class="container">
+<h2>Development Phasing</h2>
+
+<div class="phase">
+  <div class="phase-header">
+    <div class="phase-num">1</div>
+    <div class="phase-title">Fix MVP — Do These Before Any New Features (2–3 weeks)</div>
+  </div>
+  <ul>
+    <li>Fix OTP verify endpoint (BUG 1)</li>
+    <li>Fix business-scoped queries on all routes (BUG 2)</li>
+    <li>Fix OTP generator to use <code>secrets</code> (BUG 3)</li>
+    <li>Add refresh token model + /auth/refresh endpoint (BUG 4)</li>
+    <li>Fix Alembic async env.py (BUG 5)</li>
+    <li>Add Redis service to docker-compose</li>
+    <li>Move OTP storage to Redis</li>
+    <li>Add rate limiting middleware (especially /auth routes)</li>
+    <li>Add <code>services.postgres</code> to GitHub Actions CI</li>
+    <li>Add SpendingCategory seed migration</li>
+    <li>Add <code>category_id</code> to Product (fix BUG 6)</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <div class="phase-header">
+    <div class="phase-num">2</div>
+    <div class="phase-title">Production Hardening (3–4 weeks)</div>
+  </div>
+  <ul>
+    <li>Add Celery worker + Dockerfile.worker</li>
+    <li>Move SMS and email to Celery tasks</li>
+    <li>Add Nginx with TLS (Let's Encrypt)</li>
+    <li>Add PostgreSQL RLS policies</li>
+    <li>Add OCI Object Storage for invoice PDFs</li>
+    <li>Add connection pool tuning</li>
+    <li>Add Gunicorn multi-worker startup</li>
+    <li>Add <code>/customers</code> router with CUSTOMER role guard</li>
+    <li>Create Terraform infra for OCI deployment</li>
+    <li>Add Prometheus + Grafana</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <div class="phase-header">
+    <div class="phase-num">3</div>
+    <div class="phase-title">AI Integration (4–6 weeks)</div>
+  </div>
+  <ul>
+    <li>Invoice OCR endpoint + Celery processing</li>
+    <li>NL business Q&amp;A via LLM API</li>
+    <li>Auto-classification of products without categories</li>
+    <li>Demand forecasting (Prophet, nightly Celery Beat)</li>
+    <li>Customer spending dashboard with category chart</li>
+    <li>Anomaly alerts (Celery Beat + push notification)</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <div class="phase-header">
+    <div class="phase-num">4</div>
+    <div class="phase-title">Scale &amp; Ecosystem (future)</div>
+  </div>
+  <ul>
+    <li>WhatsApp Business API for OTP + receipts</li>
+    <li>UPI payment gateway integration (Razorpay / PayU)</li>
+    <li>Android app (React Native / Flutter)</li>
+    <li>Multi-store management per owner</li>
+    <li>Regional language support (Hindi, Tamil, Telugu)</li>
+    <li>Databricks + Delta Lake for analytics at scale</li>
+    <li>MLflow for model versioning</li>
+  </ul>
+</div>
+
+<div class="callout info">
+  <strong>📌 ARCHITECTURE PRINCIPLE: Start simple, add complexity only when you have the problem.</strong>
+  The bugs listed above are the only things between you and a working product. Fix those first. Redis is the only new infra you need in Phase 1. Don't add Databricks, ClickHouse, or Kafka until you have real traffic justifying them — premature complexity is the most common way student projects fail to ship.
+</div>
+</div>
+</section>
+
+<footer>
+  VyaaparKitaab — Architecture Review · September 2026 · Vaibhav Kumar
+</footer>
+
+</body>
+</html>

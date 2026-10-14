@@ -49,3 +49,39 @@ export function useUpdateInvoiceStatus() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invoices'] }),
   });
 }
+
+export type PaymentOrderData = {
+  order_id: string;
+  amount: number;
+  currency: string;
+  receipt: string;
+  key_id: string;
+  gateway: string;
+  upi_intent?: string | null;
+};
+
+export function useCreatePaymentOrder() {
+  return useMutation({
+    mutationFn: ({ invoice_id, amount }: { invoice_id: string; amount?: number }) =>
+      apiFetch<PaymentOrderData>('/payments/create-order', {
+        method: 'POST',
+        body: JSON.stringify({ invoice_id, amount }),
+      }),
+  });
+}
+
+export function useVerifyPayment() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { invoice_id: string; order_id: string; payment_id: string; signature: string }) =>
+      apiFetch<{ success: boolean; message: string; invoice_status: string }>('/payments/verify', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['storeDashboard'] });
+    },
+  });
+}

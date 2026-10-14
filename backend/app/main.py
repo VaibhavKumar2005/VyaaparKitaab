@@ -13,6 +13,7 @@ import app.models  # noqa: F401 - ensures model metadata is registered before cr
 from app.routers.auth import router as auth_router
 from app.routers.business import router as business_router
 from app.routers.health import router as health_router
+from app.routers.payments import router as payments_router
 from app.routers.transactions import router as transactions_router
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
@@ -74,3 +75,4 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(business_router, prefix="/api/v1")
 app.include_router(transactions_router, prefix="/api/v1")
+app.include_router(payments_router, prefix="/api/v1")
