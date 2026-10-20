@@ -13,6 +13,11 @@ class PaymentService:
         self.key_id = settings.PAYMENT_KEY_ID
         self.key_secret = settings.PAYMENT_KEY_SECRET
         self.webhook_secret = settings.PAYMENT_WEBHOOK_SECRET
+        # Track created orders (order_id -> metadata) to prevent cross-invoice replay
+        self._orders: dict[str, dict[str, Any]] = {}
+
+    def get_order_meta(self, order_id: str) -> dict[str, Any] | None:
+        return self._orders.get(order_id)
 
     async def create_order(
         self,
@@ -46,8 +51,16 @@ class PaymentService:
                 if res.status_code not in (200, 201):
                     raise RuntimeError(f"Payment gateway error: {res.text}")
                 data = res.json()
+                order_id = data.get("id")
+                if order_id:
+                    self._orders[order_id] = {
+                        "amount": float(amount),
+                        "currency": currency,
+                        "receipt": receipt,
+                        "invoice_id": notes.get("invoice_id"),
+                    }
                 return {
-                    "order_id": data.get("id"),
+                    "order_id": order_id,
                     "amount": amount,
                     "currency": currency,
                     "receipt": receipt,
@@ -61,6 +74,12 @@ class PaymentService:
         upi_uri = (
             f"upi://pay?pa=vyapar@bank&pn=VyaparKitaab&am={amount:.2f}&cu={currency}&tr={receipt}&tn=Invoice%20Payment"
         )
+        self._orders[mock_order_id] = {
+            "amount": float(amount),
+            "currency": currency,
+            "receipt": receipt,
+            "invoice_id": notes.get("invoice_id"),
+        }
         return {
             "order_id": mock_order_id,
             "amount": amount,
@@ -121,20 +140,34 @@ class PaymentService:
         """
         Verifies the HMAC-SHA256 signature returned by the checkout widget to prevent client-side tampering.
         """
+        if not order_id or not payment_id or not signature:
+            return False
+
         if not self.key_secret:
-            # In sandbox mode, allow mock signatures
-            return signature in ("sandbox_valid", "mock_signature") or order_id.startswith("order_mock_")
+            if settings.ENV.lower() not in ("development", "testing"):
+                return False
+            # In sandbox dev/test mode, require explicit sandbox signature AND mock order prefix
+            return order_id.startswith("order_mock_") and signature in (
+                "sandbox_valid",
+                "sandbox_valid_sig",
+                "mock_signature",
+            )
 
         message = f"{order_id}|{payment_id}".encode("utf-8")
         expected = hmac.new(self.key_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, signature)
 
-    def verify_webhook_signature(self, raw_body: bytes, signature: str) -> bool:
+    def verify_webhook_signature(self, raw_body: bytes, signature: str | None) -> bool:
         """
         Verifies the incoming webhook payload using the shared webhook secret.
         """
+        if not signature:
+            return False
+
         if not self.webhook_secret:
-            return True  # If no webhook secret configured in dev, skip or allow for testing
+            if settings.ENV.lower() not in ("development", "testing"):
+                return False
+            return signature in ("sandbox_valid", "sandbox_webhook_sig", "dummy_signature")
 
         expected = hmac.new(self.webhook_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, signature)

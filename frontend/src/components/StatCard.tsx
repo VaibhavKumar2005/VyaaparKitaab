@@ -1,9 +1,9 @@
 export function StatCard({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
-    <article className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-glow backdrop-blur-xl">
-      <p className="text-xs uppercase tracking-[0.22em] text-slate-400">{label}</p>
-      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
-      {detail ? <p className="mt-2 text-sm text-slate-400">{detail}</p> : null}
+    <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md">
+      <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
+      <p className="mt-2 font-[Space_Grotesk] text-2xl font-bold text-slate-900">{value}</p>
+      {detail ? <p className="mt-1.5 text-xs text-slate-500">{detail}</p> : null}
     </article>
   );
 }

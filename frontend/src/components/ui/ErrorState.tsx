@@ -1,9 +1,19 @@
-export function ErrorState({ label = 'Something went wrong.', onRetry }: { label?: string; onRetry?: () => void }) {
+export function ErrorState({
+  label = 'Something went wrong.',
+  onRetry,
+}: {
+  label?: string;
+  onRetry?: () => void;
+}) {
   return (
-    <div role="alert" className="rounded-2xl border border-red-400/20 bg-red-400/10 p-6 text-sm text-red-200">
-      <p>{label}</p>
+    <div role="alert" className="rounded-lg border border-due/30 bg-due-tint p-6 text-sm text-due">
+      <p className="font-medium">{label}</p>
       {onRetry ? (
-        <button type="button" onClick={onRetry} className="mt-3 rounded-lg border border-red-300/30 px-3 py-2 font-medium text-red-100 hover:bg-red-300/10">
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-3 rounded-md border border-due/40 px-3 py-1.5 font-semibold hover:bg-white/60"
+        >
           Try again
         </button>
       ) : null}

@@ -40,4 +40,11 @@ async def store_otp(db: AsyncSession, phone: str, purpose: str, otp: str) -> OTP
 
 
 def send_otp_sms(phone: str, otp: str) -> None:
-    logger.info("OTP %s sent to %s (stub; integrate Fast2SMS/Twilio later)", otp, phone)
+    from app.cores.config import settings
+    from app.services.encryption import mask_phone
+
+    masked = mask_phone(phone)
+    if settings.ENV.lower() == "development":
+        logger.info("OTP generated for %s (dev sandbox code: %s)", masked, otp)
+    else:
+        logger.info("OTP SMS dispatched to %s", masked)

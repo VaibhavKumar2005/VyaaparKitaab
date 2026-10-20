@@ -94,6 +94,22 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
 
     result = await db.execute(select(User).where(User.id == subject))
     user = result.scalar_one_or_none()
-    if user is None:
+    if user is None or not getattr(user, "is_active", True):
         raise credentials_exception
     return user
+
+
+def require_roles(allowed_roles: list[str]):
+    async def role_checker(user: User = Depends(get_current_user)) -> User:
+        if user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access forbidden: this endpoint requires {', '.join(allowed_roles)} role",
+            )
+        return user
+
+    return role_checker
+
+
+require_store_owner = require_roles(["STORE_OWNER"])
+require_customer = require_roles(["CUSTOMER"])

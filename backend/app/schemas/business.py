@@ -44,6 +44,17 @@ class ProductRead(ProductCreate):
     created_at: datetime
 
 
+class CustomerProductRead(BaseModel):
+    """Customer-facing product catalog: strictly excludes cost_price and internal inventory values."""
+    id: UUID
+    name: str
+    sku: str | None = None
+    unit: str | None = None
+    selling_price: float
+    created_at: datetime
+
+
+
 class SupplierCreate(BaseModel):
     name: str
     phone: str | None = None

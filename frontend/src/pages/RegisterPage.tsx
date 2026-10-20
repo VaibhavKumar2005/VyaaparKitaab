@@ -4,10 +4,18 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useAuth } from '../contexts/AuthContext';
 import { registerSchema, RegisterValues } from '../schemas/auth';
 
+const inputClass =
+  'mt-1.5 w-full rounded-md border border-rule bg-canvas-raised px-3.5 py-2.5 text-sm outline-none focus:border-navy';
+
 export function RegisterPage() {
   const { register } = useAuth();
   const navigate = useNavigate();
-  const { register: registerField, handleSubmit, setError, formState: { errors, isSubmitting } } = useForm<RegisterValues>({
+  const {
+    register: field,
+    handleSubmit,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<RegisterValues>({
     resolver: zodResolver(registerSchema),
     defaultValues: { email: '', password: '', full_name: '', phone: '' },
   });
@@ -22,37 +30,50 @@ export function RegisterPage() {
   };
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-md items-center px-4">
-      <form onSubmit={handleSubmit(onSubmit)} className="w-full rounded-[2rem] border border-white/10 bg-slate-950/75 p-8 shadow-glow backdrop-blur-xl">
-        <h1 className="font-[Space_Grotesk] text-3xl font-bold text-white">Create account</h1>
-        <p className="mt-2 text-sm text-slate-400">Set up your VyaparKitaab workspace.</p>
-        <label className="mt-4 block text-sm text-slate-300">
-          Full name
-          <input {...registerField('full_name')} className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none focus:border-violet-400" />
-          {errors.full_name ? <span className="mt-1 block text-xs text-red-300">{errors.full_name.message}</span> : null}
-        </label>
-        <label className="mt-4 block text-sm text-slate-300">
-          Email
-          <input {...registerField('email')} type="email" className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none focus:border-violet-400" />
-          {errors.email ? <span className="mt-1 block text-xs text-red-300">{errors.email.message}</span> : null}
-        </label>
-        <label className="mt-4 block text-sm text-slate-300">
-          Password
-          <input {...registerField('password')} type="password" className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none focus:border-violet-400" />
-          {errors.password ? <span className="mt-1 block text-xs text-red-300">{errors.password.message}</span> : null}
-        </label>
-        <label className="mt-4 block text-sm text-slate-300">
-          Phone <span className="text-slate-500">(optional)</span>
-          <input {...registerField('phone')} type="tel" className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none focus:border-violet-400" />
-        </label>
-        {errors.root ? <p role="alert" className="mt-4 text-sm text-red-300">{errors.root.message}</p> : null}
-        <button disabled={isSubmitting} className="mt-6 w-full rounded-2xl bg-violet-400 px-4 py-3 font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-60">
-          {isSubmitting ? 'Creating account...' : 'Register'}
+    <div className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-4 py-10">
+      <Link to="/" className="font-display text-2xl font-bold text-navy">
+        VyaparKitaab
+      </Link>
+      <h1 className="mt-6 font-display text-3xl font-bold">Create account</h1>
+      <p className="mt-1 text-sm text-ink-soft">Start your shop's books.</p>
+
+      <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-4" noValidate>
+        <div>
+          <label htmlFor="full_name" className="text-sm font-medium">Full name</label>
+          <input {...field('full_name')} id="full_name" autoComplete="name" className={inputClass} />
+          {errors.full_name ? <p className="mt-1 text-xs text-due">{errors.full_name.message}</p> : null}
+        </div>
+        <div>
+          <label htmlFor="email" className="text-sm font-medium">Email</label>
+          <input {...field('email')} id="email" type="email" autoComplete="email" className={inputClass} />
+          {errors.email ? <p className="mt-1 text-xs text-due">{errors.email.message}</p> : null}
+        </div>
+        <div>
+          <label htmlFor="phone" className="text-sm font-medium">
+            Mobile number <span className="font-normal text-ink-faint">(optional)</span>
+          </label>
+          <input {...field('phone')} id="phone" type="tel" autoComplete="tel" className={inputClass} />
+        </div>
+        <div>
+          <label htmlFor="password" className="text-sm font-medium">Password</label>
+          <input {...field('password')} id="password" type="password" autoComplete="new-password" className={inputClass} />
+          {errors.password ? <p className="mt-1 text-xs text-due">{errors.password.message}</p> : null}
+        </div>
+        {errors.root ? (
+          <p role="alert" className="rounded-md bg-due-tint p-3 text-sm text-due">{errors.root.message}</p>
+        ) : null}
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="w-full rounded-md bg-navy px-4 py-2.5 font-semibold text-white hover:bg-navy-dark disabled:opacity-60"
+        >
+          {isSubmitting ? 'Creating account…' : 'Create account'}
         </button>
-        <p className="mt-4 text-sm text-slate-400">
-          Already have an account? <Link to="/login" className="text-sky-300">Login</Link>
-        </p>
       </form>
+
+      <p className="mt-6 text-sm text-ink-soft">
+        Already registered? <Link to="/login" className="font-semibold text-navy hover:underline">Sign in</Link>
+      </p>
     </div>
   );
 }

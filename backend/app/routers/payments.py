@@ -93,6 +93,10 @@ async def verify_payment(
     if not is_valid:
         raise HTTPException(status_code=400, detail="Invalid payment signature")
 
+    order_meta = payment_service.get_order_meta(payload.order_id)
+    if order_meta and order_meta.get("invoice_id") and str(order_meta["invoice_id"]) != str(payload.invoice_id):
+        raise HTTPException(status_code=400, detail="Payment order does not match invoice")
+
     # Retrieve invoice
     owned_businesses = select(Business.id).where(Business.owner_id == user.id)
     res = await db.execute(
@@ -114,8 +118,14 @@ async def verify_payment(
     except Exception:
         invoice.payment_method = "UPI"
 
-    invoice.status = "PAID"
-    invoice.paid_amount = invoice.total_amount
+    settled_amount = float(order_meta["amount"]) if order_meta and "amount" in order_meta else float(invoice.total_amount - invoice.paid_amount)
+    new_paid = min(float(invoice.total_amount), float(invoice.paid_amount) + max(0.0, settled_amount))
+    invoice.paid_amount = new_paid
+    if new_paid >= float(invoice.total_amount):
+        invoice.status = "PAID"
+    else:
+        invoice.status = "CONFIRMED"
+
     await db.commit()
     await db.refresh(invoice)
 
@@ -139,10 +149,11 @@ async def payment_webhook(
     """
     body_bytes = await request.body()
 
-    if x_razorpay_signature:
-        valid = payment_service.verify_webhook_signature(body_bytes, x_razorpay_signature)
-        if not valid:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook signature")
+    if not payment_service.verify_webhook_signature(body_bytes, x_razorpay_signature):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing or invalid webhook signature",
+        )
 
     try:
         data = json.loads(body_bytes.decode("utf-8"))
@@ -155,6 +166,12 @@ async def payment_webhook(
         payment_obj = data.get("payload", {}).get("payment", {}).get("entity", {})
         notes = payment_obj.get("notes", {})
         invoice_id_str = notes.get("invoice_id")
+        order_id = payment_obj.get("order_id")
+
+        if order_id:
+            order_meta = payment_service.get_order_meta(order_id)
+            if order_meta and order_meta.get("invoice_id") and str(order_meta["invoice_id"]) != str(invoice_id_str):
+                raise HTTPException(status_code=400, detail="Order invoice mismatch")
 
         if invoice_id_str:
             res = await db.execute(select(Invoice).where(Invoice.id == invoice_id_str))

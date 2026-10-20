@@ -1,6 +1,9 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
+import { CustomerPortalShell } from './components/CustomerPortalShell';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { CustomerBillsPage } from './pages/CustomerBillsPage';
+import { CustomerDashboard } from './pages/CustomerDashboard';
 import { CustomerList } from './pages/CustomerList';
 import { DashboardRouter } from './pages/DashboardRouter';
 import { InvoiceDetail } from './pages/InvoiceDetail';
@@ -17,10 +20,12 @@ export default function App() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+
+      {/* Store Owner Application (Full financial ledger & operations) */}
       <Route
         path="/app"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute requiredRole="STORE_OWNER">
             <AppShell />
           </ProtectedRoute>
         }
@@ -32,6 +37,22 @@ export default function App() {
         <Route path="invoices/new" element={<InvoiceForm />} />
         <Route path="invoices/:id" element={<InvoiceDetail />} />
       </Route>
+
+      {/* Separated Customer Portal (Strictly isolated from shop monetary data) */}
+      <Route
+        path="/portal"
+        element={
+          <ProtectedRoute requiredRole="CUSTOMER">
+            <CustomerPortalShell />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<Navigate to="bills" replace />} />
+        <Route path="bills" element={<CustomerBillsPage />} />
+        <Route path="bills/:id" element={<InvoiceDetail />} />
+        <Route path="spending" element={<CustomerDashboard />} />
+      </Route>
+
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

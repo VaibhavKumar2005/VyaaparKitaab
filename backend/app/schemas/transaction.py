@@ -48,6 +48,22 @@ class InvoiceRead(BaseModel):
     items: list[InvoiceItemRead] = Field(default_factory=list)
 
 
+class CustomerInvoiceRead(BaseModel):
+    """Safe customer-facing invoice: only their retail bills and payment states."""
+    id: UUID
+    invoice_number: str
+    status: str
+    subtotal: float
+    tax_amount: float
+    discount_amount: float
+    total_amount: float
+    paid_amount: float
+    payment_method: str | None
+    created_at: datetime
+    items: list[InvoiceItemRead] = Field(default_factory=list)
+
+
+
 class SpendingSummary(BaseModel):
     customer_id: UUID
     from_date: date | None = None

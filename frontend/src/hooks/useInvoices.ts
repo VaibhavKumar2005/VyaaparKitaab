@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
+import {
+  createMockPaymentOrder,
+  getMockInvoice,
+  getMockInvoices,
+  isDemoMode,
+  simulateMockPayment,
+  updateMockInvoiceStatus,
+} from '../mock/mockStore';
 
 export type Invoice = {
   id: string;
@@ -28,14 +36,36 @@ export type Invoice = {
 export function useInvoices() {
   return useQuery({
     queryKey: ['invoices'],
-    queryFn: () => apiFetch<Invoice[]>('/invoices'),
+    queryFn: async () => {
+      if (isDemoMode()) {
+        return getMockInvoices();
+      }
+      try {
+        return await apiFetch<Invoice[]>('/invoices');
+      } catch {
+        return getMockInvoices();
+      }
+    },
   });
 }
 
 export function useInvoice(id: string | undefined) {
   return useQuery({
     queryKey: ['invoices', id],
-    queryFn: () => apiFetch<Invoice>(`/invoices/${id}`),
+    queryFn: async () => {
+      if (isDemoMode()) {
+        const inv = getMockInvoice(id);
+        if (!inv) throw new Error('Invoice not found');
+        return inv;
+      }
+      try {
+        return await apiFetch<Invoice>(`/invoices/${id}`);
+      } catch {
+        const inv = getMockInvoice(id);
+        if (inv) return inv;
+        throw new Error('Invoice not found');
+      }
+    },
     enabled: Boolean(id),
   });
 }
@@ -44,9 +74,16 @@ export function useUpdateInvoiceStatus() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      apiFetch<Invoice>(`/invoices/${id}/status?status=${encodeURIComponent(status)}`, { method: 'PATCH' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invoices'] }),
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      if (isDemoMode()) {
+        return updateMockInvoiceStatus(id, status);
+      }
+      return await apiFetch<Invoice>(`/invoices/${id}/status?status=${encodeURIComponent(status)}`, { method: 'PATCH' });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
   });
 }
 
@@ -62,11 +99,15 @@ export type PaymentOrderData = {
 
 export function useCreatePaymentOrder() {
   return useMutation({
-    mutationFn: ({ invoice_id, amount }: { invoice_id: string; amount?: number }) =>
-      apiFetch<PaymentOrderData>('/payments/create-order', {
+    mutationFn: async ({ invoice_id, amount }: { invoice_id: string; amount?: number }) => {
+      if (isDemoMode()) {
+        return createMockPaymentOrder(invoice_id, amount);
+      }
+      return await apiFetch<PaymentOrderData>('/payments/create-order', {
         method: 'POST',
         body: JSON.stringify({ invoice_id, amount }),
-      }),
+      });
+    },
   });
 }
 
@@ -74,14 +115,31 @@ export function useVerifyPayment() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (data: { invoice_id: string; order_id: string; payment_id: string; signature: string }) =>
-      apiFetch<{ success: boolean; message: string; invoice_status: string }>('/payments/verify', {
+    mutationFn: async (data: {
+      invoice_id: string;
+      order_id: string;
+      payment_id: string;
+      signature: string;
+      method?: 'UPI' | 'CASH';
+      amount?: number;
+    }) => {
+      if (isDemoMode()) {
+        return simulateMockPayment(data.invoice_id, data.method ?? 'UPI', data.amount);
+      }
+      return await apiFetch<{ success: boolean; message: string; invoice_status: string }>('/payments/verify', {
         method: 'POST',
-        body: JSON.stringify(data),
-      }),
+        body: JSON.stringify({
+          invoice_id: data.invoice_id,
+          order_id: data.order_id,
+          payment_id: data.payment_id,
+          signature: data.signature,
+        }),
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
-      queryClient.invalidateQueries({ queryKey: ['storeDashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
     },
   });
 }

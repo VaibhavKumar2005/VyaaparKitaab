@@ -54,4 +54,17 @@ Thumbs.db
 # Logs
 *.log
 
+# TypeScript build info
+*.tsbuildinfo
+frontend/*.d.ts
+frontend/vite.config.js
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Nested repo
+VyaaparKitaab/
+
 # Keep docs and tests tracked (do not ignore README.md or tests/)

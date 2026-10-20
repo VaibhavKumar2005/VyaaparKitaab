@@ -81,3 +81,7 @@ def test_register_login_happy_path() -> None:
     assert login_response.status_code == 200
     payload = jwt.decode(login_response.json()['access_token'], settings.SECRET_KEY, algorithms=['HS256'])
     assert payload['role'] == 'STORE_OWNER'
+
+    logout_response = client.post('/api/v1/auth/logout')
+    assert logout_response.status_code == 200
+    assert logout_response.json() == {'message': 'logged out'}

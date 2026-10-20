@@ -1,7 +1,6 @@
-export function LoadingState({ label = 'Loading...' }: { label?: string }) {
+export function LoadingState({ label = 'Loading…' }: { label?: string }) {
   return (
-    <div role="status" className="rounded-2xl border border-white/10 bg-white/5 p-6 text-sm text-slate-300">
-      <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-sky-400" />
+    <div role="status" className="rounded-lg border border-rule bg-canvas-raised p-6 text-sm text-ink-soft">
       {label}
     </div>
   );

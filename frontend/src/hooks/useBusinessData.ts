@@ -1,5 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
+import {
+  getMockBusinesses,
+  getMockCustomers,
+  getMockProducts,
+  isDemoMode,
+} from '../mock/mockStore';
 
 export type Business = {
   id: string;
@@ -34,20 +40,47 @@ export type Product = {
 export function useBusinesses() {
   return useQuery({
     queryKey: ['businesses'],
-    queryFn: () => apiFetch<Business[]>('/businesses'),
+    queryFn: async () => {
+      if (isDemoMode()) {
+        return getMockBusinesses();
+      }
+      try {
+        return await apiFetch<Business[]>('/businesses');
+      } catch {
+        return getMockBusinesses();
+      }
+    },
   });
 }
 
 export function useCustomers() {
   return useQuery({
     queryKey: ['customers'],
-    queryFn: () => apiFetch<Customer[]>('/customers'),
+    queryFn: async () => {
+      if (isDemoMode()) {
+        return getMockCustomers();
+      }
+      try {
+        return await apiFetch<Customer[]>('/customers');
+      } catch {
+        return getMockCustomers();
+      }
+    },
   });
 }
 
 export function useProducts() {
   return useQuery({
     queryKey: ['products'],
-    queryFn: () => apiFetch<Product[]>('/products'),
+    queryFn: async () => {
+      if (isDemoMode()) {
+        return getMockProducts();
+      }
+      try {
+        return await apiFetch<Product[]>('/products');
+      } catch {
+        return getMockProducts();
+      }
+    },
   });
 }

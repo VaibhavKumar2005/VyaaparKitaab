@@ -1,21 +1,61 @@
-import { Link } from 'react-router-dom';
-import { EmptyState } from '../components/ui/EmptyState';
+import { useMemo, useState } from 'react';
 import { ErrorState } from '../components/ui/ErrorState';
 import { LoadingState } from '../components/ui/LoadingState';
+import { paymentState } from '../components/StatusPill';
 import { useInvoices } from '../hooks/useInvoices';
+import { TransactionTable } from './StoreDashboard';
+
+const filters = ['All', 'Unpaid', 'Part paid', 'Paid', 'Draft'] as const;
 
 export function InvoiceList() {
   const { data, isPending, isError, refetch } = useInvoices();
+  const [filter, setFilter] = useState<(typeof filters)[number]>('All');
+  const [query, setQuery] = useState('');
 
-  if (isPending) return <LoadingState label="Loading invoices..." />;
-  if (isError) return <ErrorState label="Unable to load invoices." onRetry={() => void refetch()} />;
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return (data ?? [])
+      .filter((i) => filter === 'All' || paymentState(i) === filter)
+      .filter((i) => !q || i.invoice_number.toLowerCase().includes(q))
+      .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+  }, [data, filter, query]);
+
+  if (isPending) return <LoadingState label="Loading invoices…" />;
+  if (isError) return <ErrorState label="Couldn't load invoices." onRetry={() => void refetch()} />;
 
   return (
-    <section className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-glow backdrop-blur-xl">
-      <div className="flex items-center justify-between gap-4"><div><h1 className="font-[Space_Grotesk] text-3xl font-bold text-white">Invoices</h1><p className="mt-2 text-sm text-slate-400">Track drafts, confirmed sales, and payments.</p></div><Link to="/app/invoices/new" className="rounded-2xl bg-sky-400 px-4 py-2 text-sm font-semibold text-slate-950">New invoice</Link></div>
-      <div className="mt-6 overflow-x-auto rounded-2xl border border-white/10">
-        {data?.length ? <table className="min-w-full divide-y divide-white/10 text-left text-sm"><thead className="bg-white/5 text-slate-300"><tr><th className="px-4 py-3">Invoice</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Total</th><th className="px-4 py-3">Created</th></tr></thead><tbody className="divide-y divide-white/10 text-slate-200">{data.map((invoice) => <tr key={invoice.id}><td className="px-4 py-3 font-medium"><Link className="text-sky-300 hover:text-sky-200" to={`/app/invoices/${invoice.id}`}>{invoice.invoice_number}</Link></td><td className="px-4 py-3">{invoice.status}</td><td className="px-4 py-3">₹{invoice.total_amount.toFixed(2)}</td><td className="px-4 py-3">{new Date(invoice.created_at).toLocaleDateString()}</td></tr>)}</tbody></table> : <EmptyState label="No invoices have been created yet." />}
+    <div className="space-y-5">
+      <h1 className="text-2xl font-bold">Invoices</h1>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by status">
+          {filters.map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFilter(f)}
+              aria-pressed={filter === f}
+              className={`rounded-full border px-3 py-1 text-sm font-medium ${
+                filter === f
+                  ? 'border-navy bg-navy text-white'
+                  : 'border-rule bg-canvas-raised text-ink-soft hover:text-ink'
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+        <label className="sr-only" htmlFor="invoice-search">Search invoices</label>
+        <input
+          id="invoice-search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by invoice number"
+          className="w-full rounded-md border border-rule bg-canvas-raised px-3 py-2 text-sm outline-none focus:border-navy sm:w-64"
+        />
       </div>
-    </section>
+
+      <TransactionTable rows={rows} />
+    </div>
   );
 }
