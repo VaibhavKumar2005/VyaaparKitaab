@@ -1,0 +1,14 @@
+customer_code,name,phone,email,city,customer_type
+CUST-001,Ramesh Sharma (Household Khata),9876543210,ramesh.sharma@gmail.com,Mathura UP,Retail Household
+CUST-002,Mehta Traders (Sunil Mehta),9811223344,sunil.mehta@yahoo.in,Mathura UP,B2B Sub-Retailer
+CUST-003,Gupta Daily Provisions (Amit Gupta),9899001122,guptaprovisions@outlook.com,Vrindavan UP,B2B Sub-Retailer
+CUST-004,Agarwal Sweets & Snacks (Rajesh Agarwal),9822334455,sweets.agarwal@gmail.com,Mathura UP,HoReCa / Sweet Shop
+CUST-005,Priya Verma (Monthly Ration Account),9711554433,priya.verma@hotmail.com,Mathura UP,Retail Household
+CUST-006,Anand Provision Store (Vikram Anand),9877112233,vikram.anand@gmail.com,Agra Road Mathura,B2B Sub-Retailer
+CUST-007,Kapoor Dairy & Bakery (Suresh Kapoor),9833445566,kapoordairy@gmail.com,Civil Lines Mathura,HoReCa / Dairy
+CUST-008,City Departmental Store (Manoj Tiwari),9855667788,citystore.mtr@gmail.com,Krishna Nagar Mathura,B2B Sub-Retailer
+CUST-009,Brijwasi Bhojanalaya & Caterers,9412233445,brijwasi.caterers@gmail.com,Dampier Nagar Mathura,HoReCa / Catering
+CUST-010,Dr. Alok Chaturvedi (Family Account),9415011223,alok.chaturvedi@gmail.com,Civil Lines Mathura,Retail Household
+CUST-011,Radhika Women SHG Canteen,9917099887,radhika.shg@gmail.com,Govardhan Road,Institutional
+CUST-012,Chauhan Hostel Mess (Deepak Chauhan),9760123456,chauhan.mess@gmail.com,NH-19 Gla Area Mathura,HoReCa / Mess
+

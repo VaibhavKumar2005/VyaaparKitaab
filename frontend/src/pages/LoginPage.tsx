@@ -10,7 +10,7 @@ const inputClass =
   'mt-1.5 w-full rounded-md border border-rule bg-canvas-raised px-3.5 py-2.5 text-sm outline-none focus:border-navy';
 
 export function LoginPage() {
-  const { login, enableDemo, enableCustomerDemo } = useAuth();
+  const { login, customerOtpLogin, enableDemo, enableCustomerDemo } = useAuth();
   const navigate = useNavigate();
 
   // Tab state: 'BUSINESS' or 'CUSTOMER'
@@ -29,7 +29,7 @@ export function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: 'demo@vyapaarkitaab.in', password: '' },
+    defaultValues: { email: 'demo@vyapaarkitaab.in', password: 'Password123!' },
   });
 
   const onBusinessSubmit = async (values: LoginValues) => {
@@ -41,23 +41,30 @@ export function LoginPage() {
     }
   };
 
-  const handleSendOtp = () => {
+  const handleSendOtp = async () => {
     if (!customerPhone || customerPhone.length < 10) {
       setOtpError('Please enter a valid 10-digit Indian mobile number');
       return;
     }
     setOtpError(null);
+    try {
+      await fetch(`/api/v1/auth/otp/send?phone=${encodeURIComponent(customerPhone)}&purpose=LOGIN`, {
+        method: 'POST',
+      });
+    } catch {
+      // Allow sandbox OTP fallback if backend is offline
+    }
     setOtpSent(true);
-    setOtpValue('123456'); // Simulated sandbox OTP
+    setOtpValue('123456'); // Pre-fill sandbox OTP in development
   };
 
-  const handleVerifyCustomerOtp = (e: React.FormEvent) => {
+  const handleVerifyCustomerOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!otpValue || otpValue.length < 6) {
       setOtpError('Please enter 6-digit OTP');
       return;
     }
-    enableCustomerDemo();
+    await customerOtpLogin(customerPhone, otpValue);
     navigate('/portal/bills');
   };
 

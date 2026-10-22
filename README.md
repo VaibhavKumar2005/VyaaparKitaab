@@ -9,7 +9,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?logo=fastapi)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql)
 ![Docker](https://img.shields.io/badge/Docker-Enabled-2496ED?logo=docker)
-![OCI](https://img.shields.io/badge/Cloud-Oracle%20Cloud-F80000)
+![Cloud](https://img.shields.io/badge/Cloud-Azure%20%7C%20Render-0078D4?logo=microsoftazure)
 
 ---
 

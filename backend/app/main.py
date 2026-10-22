@@ -22,8 +22,13 @@ FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if settings.ENV.lower() == "development":
+        from app.cores.database import SessionLocal
+        from app.db.seed import seed_database_if_empty
+
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        async with SessionLocal() as session:
+            await seed_database_if_empty(session)
     yield
 
 
@@ -39,16 +44,25 @@ async def add_security_headers(request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "base-uri 'self'; "
-        "frame-ancestors 'none'; "
-        "object-src 'none'; "
-        "img-src 'self' data: blob:; "
-        "style-src 'self' 'unsafe-inline'; "
-        "script-src 'self'; "
-        "connect-src 'self'"
-    )
+    if request.url.path in ("/docs", "/redoc", "/openapi.json"):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self' https://cdn.jsdelivr.net https://fastapi.tiangolo.com; "
+            "img-src 'self' data: blob: https://fastapi.tiangolo.com; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "connect-src 'self'"
+        )
+    else:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none'; "
+            "object-src 'none'; "
+            "img-src 'self' data: blob:; "
+            "style-src 'self' 'unsafe-inline'; "
+            "script-src 'self'; "
+            "connect-src 'self'"
+        )
     return response
 
 app.add_middleware(

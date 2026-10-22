@@ -1,0 +1,18 @@
+$ pytest -v
+============================= test session starts ==============================
+platform linux -- Python 3.14.8, pytest-9.1.1, pluggy-1.6.0 -- /home/vaibhav0412/Downloads/VyaaparKitaab/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/vaibhav0412/Downloads/VyaaparKitaab
+configfile: pytest.ini
+plugins: anyio-4.14.2
+collecting ... collected 7 items
+
+tests/test_auth.py::test_register_login_happy_path PASSED                [ 14%]
+tests/test_health.py::test_health_endpoint PASSED                        [ 28%]
+tests/test_payments.py::test_payment_service_create_order_sandbox PASSED [ 42%]
+tests/test_payments.py::test_payment_service_signature_verification PASSED [ 57%]
+tests/test_payments.py::test_payment_service_get_payment_info PASSED     [ 71%]
+tests/test_payments.py::test_payment_info_endpoint PASSED                [ 85%]
+tests/test_payments.py::test_payment_webhook_endpoint PASSED             [100%]
+
+============================== 7 passed in 3.73s ===============================

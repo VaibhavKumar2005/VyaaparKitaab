@@ -32,32 +32,3 @@ export function useStoreDashboard() {
     },
   });
 }
-
-export function useCustomerDashboard(customerId: string) {
-  return useQuery({
-    queryKey: ['dashboard', 'customer', customerId],
-    queryFn: async () => {
-      if (isDemoMode()) {
-        return {
-          customer_id: customerId || 'cust-001',
-          summary: {
-            Grocery: { 'Atta & Flour': 840, 'Refined Oil': 580, 'Basmati Rice': 760 },
-            Household: { 'Detergent Powder': 330, 'Bath Soap': 260 },
-            Beverages: { 'Tea & Coffee': 520 },
-          },
-        };
-      }
-      try {
-        return await apiFetch<CustomerSummary>(`/dashboard/customer/${customerId}`);
-      } catch {
-        return {
-          customer_id: customerId,
-          summary: {
-            Grocery: { Essentials: 1200 },
-          },
-        };
-      }
-    },
-    enabled: Boolean(customerId),
-  });
-}

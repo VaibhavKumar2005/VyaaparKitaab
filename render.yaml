@@ -1,0 +1,52 @@
+# Render Blueprint for VyaparKitaab (1-Click Full-Stack Deployment)
+databases:
+  - name: vyaaparkitaab-db
+    databaseName: vyaapardb
+    user: vyaapar_user
+    plan: free
+
+services:
+  # 1. FastAPI Backend Web Service (Private Vault for Secrets & Gateway Keys)
+  - type: web
+    name: vyaaparkitaab-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vyaaparkitaab-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: PAYMENT_GATEWAY
+        value: sandbox
+      - key: PAYMENT_KEY_ID
+        sync: false
+      - key: PAYMENT_KEY_SECRET
+        sync: false
+      - key: PAYMENT_WEBHOOK_SECRET
+        sync: false
+
+  # 2. React + Vite Static Frontend (Zero Secrets Exposed)
+  - type: web
+    name: vyaaparkitaab-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://vyaaparkitaab-api.onrender.com/api/*
+      - type: rewrite
+        source: /*
+        destination: /index.html
+

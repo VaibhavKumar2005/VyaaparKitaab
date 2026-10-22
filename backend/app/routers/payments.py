@@ -66,12 +66,25 @@ async def get_payment_info(
     _: User = Depends(get_current_user),
 ):
     """
-    Connects to the payment gateway API to fetch detailed information
-    about a specific transaction (status, payment method, VPA, fees, timestamp).
+    Connects to the payment gateway API to fetch sanitized information
+    about a specific transaction (status, payment method, masked VPA/contact).
     """
+    from app.services.encryption import mask_email, mask_phone
+
     try:
         info = await payment_service.get_payment_info(payment_id)
-        return PaymentInfoResponse(**info)
+        return PaymentInfoResponse(
+            payment_id=info["payment_id"],
+            order_id=info.get("order_id"),
+            amount=info["amount"],
+            currency=info.get("currency", "INR"),
+            status=info["status"],
+            method=info.get("method"),
+            vpa=mask_email(info["vpa"]) if info.get("vpa") else None,
+            email=mask_email(info["email"]) if info.get("email") else None,
+            contact=mask_phone(info["contact"]) if info.get("contact") else None,
+            created_at=info.get("created_at"),
+        )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to retrieve payment information: {str(e)}")
 

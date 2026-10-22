@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = Field(default="postgresql://postgres@localhost:5432/vyaapardb")
     SECRET_KEY: str = Field(default="change-me-to-a-secure-random-key")
+    ENCRYPTION_KEY: str = Field(default="")
     ENV: str = Field(default="development")
     ALLOWED_ORIGINS: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["*"]
@@ -36,10 +37,17 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
+    def validate_production_security(self) -> None:
+        if self.ENV.lower() == "production":
+            if self.SECRET_KEY in ("", "change-me-to-a-secure-random-key", "ci-secret"):
+                raise ValueError("CRITICAL: SECRET_KEY must be set to a strong secret in production")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    s.validate_production_security()
+    return s
 
 
 settings = get_settings()

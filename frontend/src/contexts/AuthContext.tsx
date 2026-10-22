@@ -13,12 +13,24 @@ type AuthResponse = {
   token_type: string;
 };
 
+type RegisterPayload = {
+  email: string;
+  password: string;
+  full_name?: string;
+  phone?: string;
+  role?: 'STORE_OWNER' | 'CUSTOMER';
+  business_name?: string;
+  gstin?: string;
+  address?: string;
+};
+
 type AuthContextValue = {
   token: string | null;
   user: AuthUser | null;
   isDemo: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (payload: { email: string; password: string; full_name?: string; phone?: string }) => Promise<void>;
+  customerOtpLogin: (phone: string, otp: string) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<void>;
   logout: () => void;
   enableDemo: () => void;
   enableCustomerDemo: () => void;
@@ -102,13 +114,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setAccessTokenInState(response.access_token);
         setDemoMode(false);
       },
+      customerOtpLogin: async (phone, otp) => {
+        try {
+          const response = await apiFetch<AuthResponse>('/auth/customer/otp-login', {
+            method: 'POST',
+            body: JSON.stringify({ phone, otp }),
+          });
+          setAccessTokenInState(response.access_token);
+          setDemoMode(false);
+        } catch {
+          // Fallback to customer demo if backend is offline
+          setDemoMode(true);
+          setDemoActive(true);
+          setUser(DEMO_CUSTOMER);
+        }
+      },
       register: async (payload) => {
+        const { business_name, gstin, address, ...authPayload } = payload;
         const response = await apiFetch<AuthResponse>('/auth/register', {
           method: 'POST',
-          body: JSON.stringify(payload),
+          body: JSON.stringify(authPayload),
         });
         setAccessTokenInState(response.access_token);
         setDemoMode(false);
+        if (business_name && (payload.role ?? 'STORE_OWNER') === 'STORE_OWNER') {
+          try {
+            await apiFetch('/businesses', {
+              method: 'POST',
+              body: JSON.stringify({
+                name: business_name,
+                gstin: gstin || null,
+                address: address || null,
+                phone: payload.phone || null,
+              }),
+            });
+          } catch {
+            // Non-blocking if business creation fails
+          }
+        }
       },
       logout: () => {
         clearAccessToken();

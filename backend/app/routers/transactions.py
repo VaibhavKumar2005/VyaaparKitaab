@@ -171,17 +171,61 @@ async def update_invoice_status(
 @router.get("/dashboard/store")
 async def store_dashboard(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     owned_businesses = select(Business.id).where(Business.owner_id == user.id)
-    total_revenue = await db.execute(select(func.coalesce(func.sum(Invoice.total_amount), 0)).where(Invoice.type == "SALE", Invoice.business_id.in_(owned_businesses)))
-    pending = await db.execute(select(func.count()).select_from(Invoice).where(Invoice.status == "DRAFT", Invoice.business_id.in_(owned_businesses)))
-    low_stock = await db.execute(select(func.count()).select_from(Product).where(Product.stock_qty <= 5, Product.business_id.in_(owned_businesses)))
-    customers = await db.execute(select(func.count()).select_from(Customer).where(Customer.business_id.in_(owned_businesses)))
+    total_revenue = await db.execute(
+        select(func.coalesce(func.sum(Invoice.paid_amount), 0)).where(
+            Invoice.type == "SALE", Invoice.business_id.in_(owned_businesses)
+        )
+    )
+    pending = await db.execute(
+        select(func.count()).select_from(Invoice).where(
+            Invoice.status == "DRAFT", Invoice.business_id.in_(owned_businesses)
+        )
+    )
+    low_stock = await db.execute(
+        select(func.count()).select_from(Product).where(
+            Product.stock_qty <= 5, Product.business_id.in_(owned_businesses)
+        )
+    )
+    customers = await db.execute(
+        select(func.count()).select_from(Customer).where(
+            Customer.business_id.in_(owned_businesses)
+        )
+    )
+
+    recent_res = await db.execute(
+        select(Invoice)
+        .where(Invoice.business_id.in_(owned_businesses))
+        .order_by(Invoice.created_at.desc())
+        .limit(8)
+    )
+    recent_invoices = list(recent_res.scalars().all())
+
+    top_res = await db.execute(
+        select(Product.name, func.coalesce(func.sum(InvoiceItem.line_total), 0).label("sales"))
+        .join(InvoiceItem, InvoiceItem.product_id == Product.id)
+        .join(Invoice, Invoice.id == InvoiceItem.invoice_id)
+        .where(Invoice.type == "SALE", Product.business_id.in_(owned_businesses))
+        .group_by(Product.id, Product.name)
+        .order_by(func.sum(InvoiceItem.line_total).desc())
+        .limit(5)
+    )
+    top_products = [{"name": row[0], "sales": float(row[1])} for row in top_res.all()]
+
     return {
         "todayRevenue": float(total_revenue.scalar_one()),
         "totalCustomers": int(customers.scalar_one()),
         "lowStockItems": int(low_stock.scalar_one()),
         "pendingInvoices": int(pending.scalar_one()),
-        "topProducts": [],
-        "recentTransactions": [],
+        "topProducts": top_products,
+        "recentTransactions": [
+            {
+                "invoice_number": inv.invoice_number,
+                "total_amount": float(inv.total_amount),
+                "status": inv.status,
+                "created_at": inv.created_at.isoformat() if inv.created_at else "",
+            }
+            for inv in recent_invoices
+        ],
         "revenueSeries": [],
     }
 

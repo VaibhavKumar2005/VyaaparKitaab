@@ -36,5 +36,4 @@ class PaymentInfoResponse(BaseModel):
     email: str | None = None
     contact: str | None = None
     created_at: int | None = None
-    raw: dict[str, Any] = Field(default_factory=dict)
 

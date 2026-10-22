@@ -24,7 +24,7 @@ export function InvoiceForm() {
   const { data: customers } = useCustomers();
   const { data: products } = useProducts();
 
-  const preselectedCustId = searchParams.get('customer_id') ?? '';
+  const preselectedCustId = searchParams.get('customer_id') ?? 'cust-001';
   const [customerId, setCustomerId] = useState(preselectedCustId);
   const [customCustomerName, setCustomCustomerName] = useState(searchParams.get('customer_name') ?? '');
   const [invoiceType, setInvoiceType] = useState<'SALE' | 'PURCHASE'>('SALE');
@@ -33,6 +33,8 @@ export function InvoiceForm() {
 
   const [items, setItems] = useState<LineItem[]>([
     { productId: 'prod-001', productName: 'Fortune Sunlite Refined Sunflower Oil 1L', quantity: 10, unitPrice: 145, discount: 0 },
+    { productId: 'prod-002', productName: 'Aashirvaad Shudh Chakki Atta 10kg', quantity: 4, unitPrice: 420, discount: 50 },
+    { productId: 'prod-005', productName: 'Tata Tea Gold 500g', quantity: 6, unitPrice: 280, discount: 0 },
   ]);
 
   const totals = useMemo(() => {

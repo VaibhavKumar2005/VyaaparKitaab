@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../lib/api';
 import { formatINR, formatINRPrecise } from '../lib/format';
@@ -10,7 +9,7 @@ type CustomerSummary = {
   summary: Record<string, Record<string, number>>;
 };
 
-const colors = ['#12305f', '#1d6b4a', '#c2410c', '#0284c7', '#7c3aed'];
+const barColors = ['bg-navy', 'bg-positive', 'bg-due', 'bg-ink-soft'];
 
 const sampleDemoSummary: CustomerSummary = {
   customer_id: 'cust-me',
@@ -83,31 +82,30 @@ export function CustomerDashboard() {
       </div>
 
       <section className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
-        {/* Category Pie Chart */}
-        <article className="rounded-lg border border-rule bg-canvas-raised p-5">
+        {/* Category Distribution Bars (Zero external JS chart library overhead) */}
+        <article className="rounded-lg border border-rule bg-canvas-raised p-5 space-y-4">
           <h2 className="text-base font-semibold text-ink">Spending by Category</h2>
-          <div className="mt-4 h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={chartData.length ? chartData : [{ name: 'Grocery', value: 1 }]}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={95}
-                  label={({ name, percent }) => `${name} (${((percent || 0) * 100).toFixed(0)}%)`}
-                >
-                  {chartData.map((entry, index) => (
-                    <Cell key={entry.name} fill={colors[index % colors.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(val: any) => [formatINR(Number(val) || 0), 'Amount']}
-                  contentStyle={{ backgroundColor: '#ffffff', borderColor: '#dde3ec', borderRadius: '6px' }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+          <div className="space-y-4 pt-2">
+            {chartData.map((entry, index) => {
+              const pct = totalSpent > 0 ? Math.round((entry.value / totalSpent) * 100) : 0;
+              const colorClass = barColors[index % barColors.length];
+              return (
+                <div key={entry.name} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-ink">{entry.name}</span>
+                    <span className="num font-medium text-ink-soft">
+                      {formatINR(entry.value)} ({pct}%)
+                    </span>
+                  </div>
+                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-canvas-sunk border border-rule">
+                    <div
+                      style={{ width: `${pct}%` }}
+                      className={`h-full ${colorClass} transition-all`}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </article>
 

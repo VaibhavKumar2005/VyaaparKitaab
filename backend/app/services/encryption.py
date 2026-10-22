@@ -14,7 +14,7 @@ def _derive_fernet_key(secret: str) -> bytes:
     return base64.urlsafe_b64encode(digest)
 
 
-_KEY = _derive_fernet_key(settings.SECRET_KEY)
+_KEY = _derive_fernet_key(settings.ENCRYPTION_KEY or settings.SECRET_KEY)
 _cipher = Fernet(_KEY)
 
 

@@ -1,0 +1,32 @@
+sku,name,category,unit,cost_price,selling_price,gst_rate,stock_qty
+ATT-010,Aashirvaad Shudh Chakki Atta 10kg,Staples & Grains,Bag,385.00,435.00,5,28
+ATT-005,Patanjali Whole Wheat Chakki Atta 5kg,Staples & Grains,Bag,185.00,215.00,5,34
+RIC-005,India Gate Feast Rozzana Basmati Rice 5kg,Staples & Grains,Bag,390.00,450.00,5,22
+RIC-025,Daawat Traditional Basmati Rice 25kg,Staples & Grains,Sack,2150.00,2420.00,5,9
+DAL-001,Tata Sampann Unpolished Toor Dal 1kg,Pulses & Lentils,Pkt,142.00,168.00,5,45
+DAL-002,Tata Sampann Moong Dal Chilka 1kg,Pulses & Lentils,Pkt,118.00,140.00,5,38
+DAL-003,Fortune Chana Dal 1kg,Pulses & Lentils,Pkt,88.00,105.00,5,52
+OIL-001,Fortune Sunlite Refined Sunflower Oil 1L,Edible Oils & Ghee,Pouch,124.00,145.00,5,64
+OIL-002,Dhara Kachi Ghani Mustard Oil 1L Bottle,Edible Oils & Ghee,Btl,148.00,172.00,5,48
+OIL-015,Fortune Soyabean Health Oil 15L Tin,Edible Oils & Ghee,Tin,1820.00,2050.00,5,6
+GHE-001,Amul Pure Cow Ghee 1L Tin,Edible Oils & Ghee,Tin,565.00,625.00,12,15
+DRY-001,Amul Taaza Homogenised Toned Milk 1L,Dairy & Bakery,Pkt,66.00,72.00,5,40
+DRY-002,Amul Pasteurised Butter 500g,Dairy & Bakery,Pkt,252.00,285.00,12,19
+SLT-001,Tata Iodised Salt 1kg,Spices & Condiments,Pkt,22.00,28.00,0,120
+SPC-001,MDH Deggi Mirch Powder 100g,Spices & Condiments,Box,68.00,84.00,5,55
+SPC-002,Everest Turmeric (Haldi) Powder 200g,Spices & Condiments,Pkt,52.00,66.00,5,60
+SPC-003,Catch Sabzi Masala 100g,Spices & Condiments,Box,46.00,58.00,5,42
+SUG-005,Madhur Pure & Hygienic Sugar 5kg,Staples & Grains,Bag,225.00,255.00,5,30
+TEA-001,Tata Tea Gold Care 500g,Beverages,Pkt,245.00,285.00,5,33
+TEA-002,Brooke Bond Red Label Tea 1kg,Beverages,Pkt,440.00,510.00,5,16
+COF-001,Nescafe Classic Instant Coffee 90g Glass Jar,Beverages,Jar,265.00,310.00,18,12
+SNK-001,Parle-G Original Gluco Biscuits Value Pack 800g,Snacks & Packaged,Pkt,78.00,90.00,18,85
+SNK-002,Britannia Good Day Cashew Cookies 600g,Snacks & Packaged,Pkt,105.00,125.00,18,44
+SNK-003,Haldiram's Nagpur Aloo Bhujia 400g,Snacks & Packaged,Pkt,86.00,105.00,12,37
+SNK-004,Maggi 2-Minute Masala Noodles 12-Pack (840g),Snacks & Packaged,Pkt,142.00,168.00,18,50
+HPC-001,Surf Excel Easy Wash Detergent Powder 1.5kg,Household & Cleaning,Bag,168.00,198.00,18,26
+HPC-002,Ghadi Detergent Cake Value Pack (4x250g),Household & Cleaning,Pkt,54.00,68.00,18,70
+HPC-003,Vim Dishwash Liquid Gel Lemon 750ml,Household & Cleaning,Btl,132.00,160.00,18,24
+Per-001,Dettol Original Antiseptic Soap (Pack of 4x125g),Personal Care,Pkt,195.00,232.00,18,8
+Per-002,Colgate Strong Teeth Toothpaste 200g,Personal Care,Tube,96.00,115.00,18,7
+
