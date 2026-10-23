@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from uuid import UUID
 
 from app.cores.database import get_db
@@ -114,7 +115,11 @@ async def create_invoice(
 @router.get("/invoices", response_model=list[InvoiceRead])
 async def list_invoices(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     owned_businesses = select(Business.id).where(Business.owner_id == user.id)
-    result = await db.execute(select(Invoice).where(Invoice.business_id.in_(owned_businesses)))
+    result = await db.execute(
+        select(Invoice)
+        .options(selectinload(Invoice.items))
+        .where(Invoice.business_id.in_(owned_businesses))
+    )
     return list(result.scalars().all())
 
 
@@ -125,7 +130,9 @@ async def list_customer_bills(db: AsyncSession = Depends(get_db), user: User = D
         (Customer.phone == user.phone) | (Customer.email == user.email)
     )
     result = await db.execute(
-        select(Invoice).where(
+        select(Invoice)
+        .options(selectinload(Invoice.items))
+        .where(
             Invoice.type == "SALE",
             (Invoice.customer_id == user.id) | (Invoice.customer_id.in_(customer_ids)),
         )
@@ -136,7 +143,11 @@ async def list_customer_bills(db: AsyncSession = Depends(get_db), user: User = D
 @router.get("/invoices/{invoice_id}", response_model=InvoiceRead)
 async def get_invoice(invoice_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     owned_businesses = select(Business.id).where(Business.owner_id == user.id)
-    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id, Invoice.business_id.in_(owned_businesses)))
+    result = await db.execute(
+        select(Invoice)
+        .options(selectinload(Invoice.items))
+        .where(Invoice.id == invoice_id, Invoice.business_id.in_(owned_businesses))
+    )
     invoice = result.scalar_one_or_none()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")

@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import hmac
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -16,6 +17,11 @@ def _derive_fernet_key(secret: str) -> bytes:
 
 _KEY = _derive_fernet_key(settings.ENCRYPTION_KEY or settings.SECRET_KEY)
 _cipher = Fernet(_KEY)
+
+# Derived separate key for deterministic blind indexing (HMAC-SHA256)
+_BLIND_INDEX_KEY = hashlib.sha256(
+    (settings.ENCRYPTION_KEY or settings.SECRET_KEY).encode("utf-8") + b":blind_index_salt"
+).digest()
 
 
 def encrypt_field(raw_text: str | None) -> str | None:
@@ -39,6 +45,17 @@ def decrypt_field(encrypted_text: str | None) -> str | None:
         return decrypted.decode("utf-8")
     except InvalidToken:
         return "[Decryption Error]"
+
+
+def blind_index(raw_text: str | None) -> str:
+    """
+    Deterministic HMAC-SHA256 blind index for fast exact-match lookup
+    and duplicate detection of encrypted fields without revealing plaintext.
+    """
+    if not raw_text:
+        return ""
+    clean = str(raw_text).strip().lower()
+    return hmac.new(_BLIND_INDEX_KEY, clean.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 # --- Data Masking Utilities (Safe User Display) ---
@@ -97,6 +114,10 @@ class EncryptedString(TypeDecorator):
     """
     impl = String
     cache_ok = True
+
+    def __init__(self, length: int = 1024, **kwargs: Any):
+        super().__init__(**kwargs)
+        self.impl = String(length)
 
     def process_bind_param(self, value: Any, dialect: Any) -> Any:
         if value is None:

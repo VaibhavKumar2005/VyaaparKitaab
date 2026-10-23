@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 const links = [
   { to: '/portal/bills', label: 'My Bills & Receipts (मेरे बिल)', icon: Receipt },
-  { to: '/portal/spending', label: 'Spending Insights (खर्च विश्लेषण)', icon: PieChart },
+  { to: '/portal/spending', label: 'Personal Spending & Cost Tracker (खर्च व ऑनलाइन खरीद)', icon: PieChart },
 ];
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>

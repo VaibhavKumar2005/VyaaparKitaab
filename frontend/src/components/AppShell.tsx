@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Receipt, Users, Package, LogOut, Plus, RotateCcw } from 'lucide-react';
+import { LayoutDashboard, Receipt, Users, Package, LogOut, Plus, RotateCcw, ShoppingBag } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { resetMockData } from '../mock/mockStore';
 import { useQueryClient } from '@tanstack/react-query';
@@ -9,6 +9,7 @@ const links = [
   { to: '/app/invoices', label: 'Invoices', icon: Receipt },
   { to: '/app/customers', label: 'Customers', icon: Users },
   { to: '/app/products', label: 'Inventory', icon: Package },
+  { to: '/portal/spending', label: 'Personal Spending', icon: ShoppingBag },
 ];
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>

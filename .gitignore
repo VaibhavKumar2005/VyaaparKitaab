@@ -68,3 +68,7 @@ frontend/vite.config.js
 VyaaparKitaab/
 
 # Keep docs and tests tracked (do not ignore README.md or tests/)
+
+# Database backups
+.db_backups/
+

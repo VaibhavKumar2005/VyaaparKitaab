@@ -57,31 +57,34 @@ async def override_get_db():
 
 
 fake_session = FakeSession()
-app.dependency_overrides[get_db] = override_get_db
 
 
 def test_register_login_happy_path() -> None:
-    client = TestClient(app)
-    register_response = client.post(
-        '/api/v1/auth/register',
-        json={
-            'email': 'owner@example.com',
-            'password': 'Password123!',
-            'full_name': 'Owner',
-            'phone': '9999999999',
-            'role': 'STORE_OWNER',
-        },
-    )
-    assert register_response.status_code == 200
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        client = TestClient(app)
+        register_response = client.post(
+            '/api/v1/auth/register',
+            json={
+                'email': 'owner@example.com',
+                'password': 'Password123!',
+                'full_name': 'Owner',
+                'phone': '9999999999',
+                'role': 'STORE_OWNER',
+            },
+        )
+        assert register_response.status_code == 200
 
-    login_response = client.post(
-        '/api/v1/auth/login',
-        json={'email': 'owner@example.com', 'password': 'Password123!'},
-    )
-    assert login_response.status_code == 200
-    payload = jwt.decode(login_response.json()['access_token'], settings.SECRET_KEY, algorithms=['HS256'])
-    assert payload['role'] == 'STORE_OWNER'
+        login_response = client.post(
+            '/api/v1/auth/login',
+            json={'email': 'owner@example.com', 'password': 'Password123!'},
+        )
+        assert login_response.status_code == 200
+        payload = jwt.decode(login_response.json()['access_token'], settings.SECRET_KEY, algorithms=['HS256'])
+        assert payload['role'] == 'STORE_OWNER'
 
-    logout_response = client.post('/api/v1/auth/logout')
-    assert logout_response.status_code == 200
-    assert logout_response.json() == {'message': 'logged out'}
+        logout_response = client.post('/api/v1/auth/logout')
+        assert logout_response.status_code == 200
+        assert logout_response.json() == {'message': 'logged out'}
+    finally:
+        app.dependency_overrides.pop(get_db, None)
