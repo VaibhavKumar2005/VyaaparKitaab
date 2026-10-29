@@ -4,10 +4,11 @@ Revision ID: 0002_add_refresh_tokens
 Revises: 0001_initial
 Create Date: 2026-09-15 00:00:00.000000
 """
-from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+from contextlib import suppress
 
+import sqlalchemy as sa
+from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision = "0002_add_refresh_tokens"
 down_revision = "0001_initial"
@@ -17,11 +18,8 @@ depends_on = None
 
 def upgrade() -> None:
     # ensure uuid generator is available
-    try:
+    with suppress(sa.exc.SQLAlchemyError):
         op.execute('CREATE EXTENSION IF NOT EXISTS "pgcrypto";')
-    except Exception:
-        # extension creation may require superuser privileges; ignore if not available
-        pass
 
     op.create_table(
         "refresh_tokens",

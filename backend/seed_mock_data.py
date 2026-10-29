@@ -1,13 +1,13 @@
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import select
 from app.cores.database import SessionLocal
-from app.models.user import User
 from app.models.business import Business, Customer, Product
 from app.models.transaction import Invoice, InvoiceItem
+from app.models.user import User
 from app.services.auth import hash_password
+from sqlalchemy import select
 
 
 async def seed_data():
@@ -153,13 +153,13 @@ async def seed_data():
                     total_amount=total,
                     paid_amount=paid,
                     payment_method=pay_method,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
                 session.add(inv)
                 await session.flush()
 
                 # Add sample invoice item
-                sample_prod = list(products.values())[0]
+                sample_prod = next(iter(products.values()))
                 item = InvoiceItem(
                     id=uuid.uuid4(),
                     invoice_id=inv.id,

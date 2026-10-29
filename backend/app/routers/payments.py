@@ -1,17 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Header, status
+import json
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import json
 
 from app.cores.database import get_db
 from app.models.business import Business
 from app.models.transaction import Invoice
 from app.models.user import User
 from app.schemas.payment import (
+    PaymentInfoResponse,
     PaymentOrderCreate,
     PaymentOrderResponse,
     PaymentVerifyRequest,
-    PaymentInfoResponse,
 )
 from app.services.auth import get_current_user
 from app.services.payment import payment_service
@@ -49,6 +50,10 @@ async def create_payment_order(
         notes={"invoice_id": str(invoice.id), "invoice_number": invoice.invoice_number},
     )
 
+    invoice.pending_order_id = order["order_id"]
+    invoice.pending_order_amount = amount_to_pay
+    await db.commit()
+
     return PaymentOrderResponse(
         order_id=order["order_id"],
         amount=order["amount"],
@@ -85,8 +90,8 @@ async def get_payment_info(
             contact=mask_phone(info["contact"]) if info.get("contact") else None,
             created_at=info.get("created_at"),
         )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to retrieve payment information: {str(e)}")
+    except (RuntimeError, ValueError, KeyError) as e:
+        raise HTTPException(status_code=502, detail=f"Failed to retrieve payment information: {e!s}") from e
 
 
 @router.post("/verify")
@@ -122,18 +127,29 @@ async def verify_payment(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
+    if invoice.pending_order_id and invoice.pending_order_id != payload.order_id:
+        raise HTTPException(status_code=400, detail="Payment order does not match invoice pending order")
+
     # Fetch method info if available
     try:
         payment_info = await payment_service.get_payment_info(payload.payment_id)
         raw_method = payment_info.get("method", "UPI").upper()
         method_map = {"UPI": "UPI", "CARD": "CARD", "NETBANKING": "CARD", "WALLET": "UPI"}
         invoice.payment_method = method_map.get(raw_method, "UPI")
-    except Exception:
+    except (RuntimeError, ValueError, KeyError):
         invoice.payment_method = "UPI"
 
-    settled_amount = float(order_meta["amount"]) if order_meta and "amount" in order_meta else float(invoice.total_amount - invoice.paid_amount)
+    if invoice.pending_order_amount is not None:
+        settled_amount = float(invoice.pending_order_amount)
+    elif order_meta and "amount" in order_meta:
+        settled_amount = float(order_meta["amount"])
+    else:
+        settled_amount = float(invoice.total_amount - invoice.paid_amount)
+
     new_paid = min(float(invoice.total_amount), float(invoice.paid_amount) + max(0.0, settled_amount))
     invoice.paid_amount = new_paid
+    invoice.pending_order_id = None
+    invoice.pending_order_amount = None
     if new_paid >= float(invoice.total_amount):
         invoice.status = "PAID"
     else:
@@ -170,8 +186,8 @@ async def payment_webhook(
 
     try:
         data = json.loads(body_bytes.decode("utf-8"))
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
 
     event = data.get("event", "")
     # Check for successful capture
@@ -190,9 +206,24 @@ async def payment_webhook(
             res = await db.execute(select(Invoice).where(Invoice.id == invoice_id_str))
             invoice = res.scalar_one_or_none()
             if invoice and hasattr(invoice, "total_amount"):
-                invoice.status = "PAID"
-                invoice.paid_amount = invoice.total_amount
+                if order_id and getattr(invoice, "pending_order_id", None) and invoice.pending_order_id != order_id:
+                    raise HTTPException(status_code=400, detail="Order invoice mismatch")
+
+                raw_amount_paise = payment_obj.get("amount")
+                if getattr(invoice, "pending_order_amount", None) is not None:
+                    settled = float(invoice.pending_order_amount)
+                elif raw_amount_paise is not None:
+                    settled = float(raw_amount_paise) / 100.0
+                else:
+                    settled = float(invoice.total_amount) - float(getattr(invoice, "paid_amount", 0.0) or 0.0)
+
+                current_paid = float(getattr(invoice, "paid_amount", 0.0) or 0.0)
+                new_paid = min(float(invoice.total_amount), current_paid + max(0.0, settled))
+                invoice.paid_amount = new_paid
+                invoice.status = "PAID" if new_paid >= float(invoice.total_amount) else "CONFIRMED"
                 invoice.payment_method = "UPI"
+                invoice.pending_order_id = None
+                invoice.pending_order_amount = None
                 await db.commit()
 
     return {"status": "success", "received": True}

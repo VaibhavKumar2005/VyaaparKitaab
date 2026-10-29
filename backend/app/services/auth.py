@@ -1,19 +1,19 @@
-from datetime import datetime, timedelta, timezone
+import hashlib
+import hmac
+import secrets
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-import bcrypt
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import secrets
-import hashlib
-import hmac
-from app.models.refresh_token import RefreshToken
 
 from app.cores.config import settings
 from app.cores.database import get_db
+from app.models.refresh_token import RefreshToken
 from app.models.user import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -29,8 +29,8 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def create_access_token(subject: str, role: str, expires_delta: timedelta | None = None) -> str:
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
-    payload = {"sub": subject, "role": role, "exp": expire, "iat": datetime.now(timezone.utc)}
+    expire = datetime.now(UTC) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    payload = {"sub": subject, "role": role, "exp": expire, "iat": datetime.now(UTC)}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
 
 
@@ -45,7 +45,7 @@ def generate_refresh_token(raw_length: int = 64) -> str:
 
 async def store_refresh_token(db: AsyncSession, user_id: str, raw_token: str, days: int = 30) -> RefreshToken:
     token_hash = _hash_token(raw_token)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=days)
+    expires_at = datetime.now(UTC) + timedelta(days=days)
     refresh = RefreshToken(user_id=user_id, token_hash=token_hash, expires_at=expires_at)
     db.add(refresh)
     await db.commit()
@@ -64,13 +64,13 @@ async def verify_and_rotate_refresh_token(db: AsyncSession, raw_token: str, days
         return None
     if token_row.revoked:
         return None
-    if token_row.expires_at < datetime.now(timezone.utc):
+    if token_row.expires_at < datetime.now(UTC):
         return None
     # rotate: revoke (or delete) old token and create a new one
     token_row.revoked = True
     await db.commit()
     new_raw = generate_refresh_token()
-    new_row = await store_refresh_token(db, str(token_row.user_id), new_raw, days=days)
+    await store_refresh_token(db, str(token_row.user_id), new_raw, days=days)
     return {"user_id": str(token_row.user_id), "raw": new_raw}
 
 

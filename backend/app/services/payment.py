@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import uuid
 from typing import Any
+
 import httpx
 
 from app.cores.config import settings
@@ -30,11 +31,13 @@ class PaymentService:
         Creates an order with the payment gateway.
         In sandbox mode (default when keys are unset), returns a simulated order with UPI intent.
         """
+        if amount <= 0:
+            raise ValueError("Order amount must be positive")
         notes = notes or {}
         receipt = receipt or f"rcpt_{uuid.uuid4().hex[:8]}"
 
         if self.gateway == "razorpay" and self.key_id and self.key_secret:
-            amount_in_paise = int(round(amount * 100))
+            amount_in_paise = round(amount * 100)
             payload = {
                 "amount": amount_in_paise,
                 "currency": currency,
@@ -153,7 +156,7 @@ class PaymentService:
                 "mock_signature",
             )
 
-        message = f"{order_id}|{payment_id}".encode("utf-8")
+        message = f"{order_id}|{payment_id}".encode()
         expected = hmac.new(self.key_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, signature)
 

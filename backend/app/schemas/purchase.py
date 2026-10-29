@@ -1,5 +1,6 @@
 from datetime import datetime
 from uuid import UUID
+
 from pydantic import BaseModel, Field
 
 
@@ -96,4 +97,103 @@ class TransactionGraphResponse(BaseModel):
     edges: list[TransactionGraphEdge]
     total_routed_volume: float
     currency: str = "INR"
+
+
+class PayeeSummaryItem(BaseModel):
+    payee_name: str
+    payee_type: str
+    total_paid: float
+    share_percentage: float
+    payment_count: int
+    avg_payment: float
+    last_paid_at: str
+    primary_channel: str
+    recency_days: float
+    ml_cluster_label: str = "Regular Payee"
+    pca_x: float = 0.0
+    pca_y: float = 0.0
+
+
+class PaymentChannelSummaryItem(BaseModel):
+    channel: str
+    total_paid: float
+    percentage: float
+    transaction_count: int
+
+
+class PaymentAnomalyItem(BaseModel):
+    payee_name: str
+    amount: float
+    paid_at: str
+    channel: str
+    note: str
+
+
+class OutgoingPaymentsSummaryResponse(BaseModel):
+    total_paid_to_others: float
+    total_transactions: int
+    unique_payees_count: int
+    top_payee_name: str
+    top_payee_amount: float
+    predicted_7d_outflow: float
+    predicted_30d_outflow: float
+    ai_summary_text: str
+    ml_models_used: dict[str, object]
+    payee_summary: list[PayeeSummaryItem]
+    payment_app_summary: list[PaymentChannelSummaryItem]
+    anomalies: list[PaymentAnomalyItem]
+
+
+class StoreOptionItem(BaseModel):
+    store_name: str
+    store_type: str
+    total_spent: float
+    transaction_count: int
+    last_tx_at: str
+
+
+class StoreTransactionPoint(BaseModel):
+    id: str
+    date: str
+    paid_at: str
+    amount: float
+    cumulative_amount: float
+    order_id: str
+    items_note: str
+    payment_method: str
+    category: str
+
+
+class StoreMethodSplitItem(BaseModel):
+    method: str
+    amount: float
+    percentage: float
+    count: int
+
+
+class StoreCategorySplitItem(BaseModel):
+    category: str
+    amount: float
+    percentage: float
+    count: int
+
+
+class StoreDrilldownResponse(BaseModel):
+    selected_store: str
+    store_type: str
+    total_spent: float
+    share_of_wallet_pct: float
+    transaction_count: int
+    avg_order_value: float
+    max_order_value: float
+    min_order_value: float
+    predicted_next_order: float
+    available_stores: list[StoreOptionItem]
+    transactions_timeline: list[StoreTransactionPoint]
+    payment_method_split: list[StoreMethodSplitItem]
+    category_split: list[StoreCategorySplitItem]
+    store_flow_nodes: list[TransactionGraphNode]
+    store_flow_edges: list[TransactionGraphEdge]
+
+
 

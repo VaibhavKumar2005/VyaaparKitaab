@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,11 +12,13 @@ from app.schemas.purchase import (
     CategoryBreakdownItem,
     DailySpendingItem,
     MarketplaceBreakdownItem,
+    OutgoingPaymentsSummaryResponse,
     ParsedInvoiceResponse,
     ParseInvoiceTextRequest,
     PersonalSpendingAnalytics,
     PurchaseCreate,
     PurchaseRead,
+    StoreDrilldownResponse,
     TransactionGraphEdge,
     TransactionGraphNode,
     TransactionGraphResponse,
@@ -24,6 +26,10 @@ from app.schemas.purchase import (
 from app.services.auth import get_current_user
 from app.services.encryption import blind_index
 from app.services.invoice_parser import parse_marketplace_receipt_text
+from app.services.ml_models import (
+    get_store_transaction_drilldown,
+    summarize_payments_made_to_others,
+)
 
 router = APIRouter(prefix="/purchases", tags=["purchases"])
 
@@ -105,8 +111,8 @@ async def get_spending_analytics(
     - Marketplace breakdown (Amazon vs others)
     - Category distribution
     """
-    now = datetime.now(timezone.utc)
-    today_start = datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=timezone.utc)
+    now = datetime.now(UTC)
+    today_start = datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=UTC)
     week_start = now - timedelta(days=7)
     month_start = now - timedelta(days=30)
     past_14_days = now - timedelta(days=14)
@@ -212,7 +218,7 @@ async def get_spending_analytics(
             date=d,
             total_cost=round(info["total_cost"], 2),
             order_count=info["order_count"],
-            marketplaces=sorted(list(info["marketplaces"])),
+            marketplaces=sorted(info["marketplaces"]),
         )
         for d, info in sorted(daily_map.items())
     ]
@@ -358,6 +364,37 @@ async def get_transaction_graph(
         total_routed_volume=round(total_routed, 2),
         currency="INR",
     )
+
+
+@router.get("/payments-to-others", response_model=OutgoingPaymentsSummaryResponse)
+async def get_payments_made_to_others_summary(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Summarizes all payments made by the user to others (marketplaces, direct UPI contacts,
+    wholesale suppliers, and retail stores), enriched with scikit-learn KMeans payee clustering,
+    Ridge/RandomForest 7d & 30d outflow regression, and IsolationForest anomaly detection.
+    """
+    summary = await summarize_payments_made_to_others(db=db, user=user)
+    return OutgoingPaymentsSummaryResponse(**summary)
+
+
+@router.get("/store-drilldown", response_model=StoreDrilldownResponse)
+async def get_store_drilldown(
+    store: str | None = Query(default=None, description="Specific store/merchant name to inspect graphically"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Returns graphical transaction drill-down for a particular store/merchant/payee:
+    - Chronological order bars + running cumulative cost curve
+    - Store-specific payment method & category breakdown
+    - Directed Store-to-Order flow graph (Bank -> UPI App -> Store -> Individual Orders)
+    - EWMA predicted next spend at that store
+    """
+    drilldown = await get_store_transaction_drilldown(db=db, user=user, store_name=store)
+    return StoreDrilldownResponse(**drilldown)
 
 
 @router.post("/parse-invoice-text", response_model=ParsedInvoiceResponse)

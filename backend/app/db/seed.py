@@ -1,17 +1,16 @@
 import asyncio
 import csv
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.cores.database import Base, SessionLocal, engine
 import app.models  # noqa: F401
+from app.cores.database import Base, SessionLocal, engine
 from app.models.business import Business, Customer, Product, Supplier
 from app.models.transaction import Invoice, InvoiceItem
 from app.models.user import User
 from app.services.auth import hash_password
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = REPO_ROOT / "data"
@@ -124,7 +123,7 @@ async def seed_database_if_empty(db: AsyncSession) -> dict[str, int]:
     await db.flush()
 
     # 6. Load Multi-Item GST Invoices from CSV
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     invoices_created = 0
     tx_csv = DATA_DIR / "indian_kirana_transactions.csv"
     if tx_csv.exists():

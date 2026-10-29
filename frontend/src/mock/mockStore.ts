@@ -16,12 +16,16 @@ const CUSTOMERS_STORAGE_KEY = 'vyaaparkitaab_mock_customers';
 
 export function isDemoMode(): boolean {
   if (typeof window === 'undefined') return true;
+  const hasToken = Boolean(localStorage.getItem('token'));
   const stored = localStorage.getItem(DEMO_STORAGE_KEY);
+  if (hasToken) {
+    // When authenticated with a live JWT, default to live backend unless demo mode was explicitly forced
+    return stored === 'true';
+  }
   if (stored !== null) {
     return stored === 'true';
   }
-  // Default to true if no auth token is present, allowing immediate testing
-  return !localStorage.getItem('token');
+  return true;
 }
 
 export function setDemoMode(enabled: boolean): void {

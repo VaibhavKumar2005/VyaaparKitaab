@@ -9,3 +9,6 @@ python-jose[cryptography]
 passlib[bcrypt]
 python-dotenv
 httpx
+numpy
+pandas
+scikit-learn

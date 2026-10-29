@@ -28,6 +28,8 @@ class Invoice(Base):
     payment_method: Mapped[str | None] = mapped_column(
         Enum("CASH", "UPI", "CARD", "CREDIT", name="payment_method"), nullable=True
     )
+    pending_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    pending_order_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     items = relationship("InvoiceItem", back_populates="invoice", cascade="all, delete-orphan")
 

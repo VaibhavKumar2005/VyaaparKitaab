@@ -1,24 +1,26 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
+import hashlib
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, timezone
 
-from app.cores.database import get_db
 from app.cores.config import settings
-import hashlib
+from app.cores.database import get_db
+from app.cores.rate_limit import check_rate_limit
 from app.models.refresh_token import RefreshToken
-from app.models.user import User
 from app.models.transaction import OTPVerification
+from app.models.user import User
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
 from app.services.auth import (
     create_access_token,
-    hash_password,
-    verify_password,
     generate_refresh_token,
+    hash_password,
     store_refresh_token,
     verify_and_rotate_refresh_token,
+    verify_password,
 )
 from app.services.otp import generate_otp, send_otp_sms, store_otp, verify_otp
 
@@ -65,6 +67,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
 
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
+    check_rate_limit(f"login:{payload.email.lower()}", max_requests=10, window_seconds=60)
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
     if not user or not verify_password(payload.password, user.hashed_password):
@@ -90,6 +93,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
 @router.post("/otp/send")
 async def send_otp(phone: str, purpose: str = "TRANSACTION", db: AsyncSession = Depends(get_db)):
     clean_phone = phone.strip().replace(" ", "").replace("+91", "")
+    check_rate_limit(f"otp_send:{clean_phone}", max_requests=5, window_seconds=60)
     otp = generate_otp()
     await store_otp(db, clean_phone, purpose, otp)
     send_otp_sms(clean_phone, otp)
@@ -147,8 +151,9 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 @router.post("/otp/verify")
 async def verify_otp_endpoint(phone: str, otp: str, purpose: str = "TRANSACTION", db: AsyncSession = Depends(get_db)):
     clean_phone = phone.strip().replace(" ", "").replace("+91", "")
+    check_rate_limit(f"otp_verify:{clean_phone}", max_requests=10, window_seconds=60)
     # Find the most recent unused OTP for this phone+purpose that hasn't expired
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     result = await db.execute(
         select(OTPVerification)
         .where(
@@ -193,7 +198,7 @@ async def customer_otp_login(payload: CustomerOtpLoginRequest, db: AsyncSession 
 
     is_sandbox_otp_allowed = settings.ENV.lower() in ("development", "testing") and payload.otp == "123456"
     if not is_sandbox_otp_allowed:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = await db.execute(
             select(OTPVerification)
             .where(
@@ -250,8 +255,7 @@ async def verify_business_kyc(
     db: AsyncSession = Depends(get_db),
 ):
     """Verify GSTIN and Settlement Bank Account for Merchant Store Owner."""
-    from app.services.kyc import verify_gstin, verify_bank_account
-    from app.models.business import Business
+    from app.services.kyc import verify_bank_account, verify_gstin
 
     gst_result = verify_gstin(payload.gstin)
     if not gst_result.get("valid"):

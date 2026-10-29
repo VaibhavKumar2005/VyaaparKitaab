@@ -1,6 +1,5 @@
 import re
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 
 def parse_marketplace_receipt_text(text: str) -> dict:
@@ -14,7 +13,7 @@ def parse_marketplace_receipt_text(text: str) -> dict:
             "marketplace": "Amazon",
             "order_id": None,
             "amount": None,
-            "purchased_at": datetime.now(timezone.utc),
+            "purchased_at": datetime.now(UTC),
             "items_summary": None,
             "confidence": "LOW",
         }
@@ -37,7 +36,7 @@ def parse_marketplace_receipt_text(text: str) -> dict:
         marketplace = "Amazon"
 
     # 2. Extract Order ID
-    order_id: Optional[str] = None
+    order_id: str | None = None
     # Amazon standard order format: 404-1234567-8901234
     amz_match = re.search(r"\b(\d{3}-\d{7}-\d{7})\b", raw)
     if amz_match:
@@ -58,7 +57,7 @@ def parse_marketplace_receipt_text(text: str) -> dict:
             order_id = generic_match.group(1)
 
     # 3. Extract Amount (INR)
-    amount: Optional[float] = None
+    amount: float | None = None
     # Priority 1: explicitly labeled totals
     labeled_total_match = re.search(
         r"(?:order\s*total|grand\s*total|total\s*amount|amount\s*paid|total\s*paid|total)[:\s]*[₹Rs\.]*\s*([0-9,]+(?:\.[0-9]{1,2})?)",
@@ -95,7 +94,7 @@ def parse_marketplace_receipt_text(text: str) -> dict:
                 continue
 
     # 4. Extract Purchased Date
-    purchased_at = datetime.now(timezone.utc)
+    purchased_at = datetime.now(UTC)
     date_match = re.search(
         r"(?:order\s*placed|ordered\s*on|date)[:\s]*([0-9]{1,2}[\s\/\-]+[a-zA-Z0-9]+[\s\/\-]+[0-9]{2,4})",
         raw,
@@ -114,13 +113,13 @@ def parse_marketplace_receipt_text(text: str) -> dict:
         ):
             try:
                 parsed_dt = datetime.strptime(date_str, fmt)
-                purchased_at = parsed_dt.replace(tzinfo=timezone.utc)
+                purchased_at = parsed_dt.replace(tzinfo=UTC)
                 break
             except ValueError:
                 continue
 
     # 5. Extract Item Note / Summary
-    items_summary: Optional[str] = None
+    items_summary: str | None = None
     item_section_match = re.search(
         r"(?:items\s*ordered|item\s*details|product\s*details|items?)[:\s]*\n+([^\n\r]+)",
         raw,

@@ -1,0 +1,18 @@
+[project]
+name = "vyaaparkitaab"
+version = "0.1.0"
+description = "Security-first MSME ledger, UPI checkout, encrypted personal purchase vault, and AI demand forecasting"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Header",
+    "fastapi.Body",
+]
+

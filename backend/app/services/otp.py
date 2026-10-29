@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +30,7 @@ async def store_otp(db: AsyncSession, phone: str, purpose: str, otp: str) -> OTP
         phone=phone,
         otp_hash=hash_otp(otp),
         purpose=purpose,
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
         used=False,
     )
     db.add(verification)

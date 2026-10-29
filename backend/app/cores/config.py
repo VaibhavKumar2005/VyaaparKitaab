@@ -1,8 +1,7 @@
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import field_validator
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -38,9 +37,12 @@ class Settings(BaseSettings):
         return value
 
     def validate_production_security(self) -> None:
-        if self.ENV.lower() == "production":
-            if self.SECRET_KEY in ("", "change-me-to-a-secure-random-key", "ci-secret"):
-                raise ValueError("CRITICAL: SECRET_KEY must be set to a strong secret in production")
+        if self.ENV.lower() == "production" and self.SECRET_KEY in (
+            "",
+            "change-me-to-a-secure-random-key",
+            "ci-secret",
+        ):
+            raise ValueError("CRITICAL: SECRET_KEY must be set to a strong secret in production")
 
 
 @lru_cache(maxsize=1)

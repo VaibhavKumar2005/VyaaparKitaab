@@ -1,10 +1,11 @@
 import base64
 import hashlib
 import hmac
+import re
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy.types import TypeDecorator, String
+from sqlalchemy.types import String, TypeDecorator
 
 from app.cores.config import settings
 
@@ -56,6 +57,33 @@ def blind_index(raw_text: str | None) -> str:
         return ""
     clean = str(raw_text).strip().lower()
     return hmac.new(_BLIND_INDEX_KEY, clean.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def blind_phone(phone: str | None) -> str | None:
+    """
+    Compute a canonical HMAC-SHA256 blind index for an Indian phone number.
+    Normalizes formatting (+91, spaces, hyphens) to the trailing 10 digits.
+    """
+    if not phone:
+        return None
+    digits = re.sub(r"\D", "", str(phone))
+    if not digits:
+        return None
+    canonical = digits[-10:] if len(digits) >= 10 else digits
+    return hmac.new(_BLIND_INDEX_KEY, f"phone:{canonical}".encode(), hashlib.sha256).hexdigest()
+
+
+def blind_email(email: str | None) -> str | None:
+    """
+    Compute a canonical case-insensitive HMAC-SHA256 blind index for an email address.
+    """
+    if not email:
+        return None
+    canonical = str(email).strip().lower()
+    if not canonical:
+        return None
+    return hmac.new(_BLIND_INDEX_KEY, f"email:{canonical}".encode(), hashlib.sha256).hexdigest()
+
 
 
 # --- Data Masking Utilities (Safe User Display) ---

@@ -6,11 +6,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+import app.models
 from app.cores.config import settings
 from app.cores.database import Base, engine
 from app.cores.exceptions import register_exception_handlers
-import app.models  # noqa: F401 - ensures model metadata is registered before create_all
+from app.routers.ai_insights import router as ai_router
 from app.routers.auth import router as auth_router
+from app.routers.banking import router as banking_router
 from app.routers.business import router as business_router
 from app.routers.health import router as health_router
 from app.routers.payments import router as payments_router
@@ -91,4 +93,6 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(business_router, prefix="/api/v1")
 app.include_router(transactions_router, prefix="/api/v1")
 app.include_router(payments_router, prefix="/api/v1")
+app.include_router(banking_router, prefix="/api/v1")
 app.include_router(purchases_router, prefix="/api/v1")
+app.include_router(ai_router, prefix="/api/v1")

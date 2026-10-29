@@ -3,9 +3,8 @@ import os
 os.environ.setdefault('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/vyaapardb')
 os.environ.setdefault('ENV', 'testing')
 
-from fastapi.testclient import TestClient
-
 from app.main import app
+from fastapi.testclient import TestClient
 
 
 def test_health_endpoint() -> None:

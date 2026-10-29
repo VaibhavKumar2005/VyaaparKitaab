@@ -22,12 +22,25 @@ import {
   useCreatePersonalPurchase,
   useDeletePersonalPurchase,
   useTransactionGraph,
+  usePaymentsToOthersSummary,
+  useStoreDrilldown,
   parseInvoiceTextApi,
   type CreatePurchasePayload,
 } from '../hooks/usePurchases';
 import { formatINR, formatINRPrecise, formatDate } from '../lib/format';
+import { BankingIncomeExplorer } from '../components/BankingIncomeExplorer';
 
-const MARKETPLACES = ['Amazon', 'Flipkart', 'Blinkit', 'Myntra', 'Zepto', 'Instamart', 'Other'];
+const MARKETPLACES = [
+  'Amazon',
+  'Flipkart',
+  'Blinkit',
+  'Myntra',
+  'Zepto',
+  'Instamart',
+  'Direct UPI to Person / Contact',
+  'Local Shop / Merchant',
+  'Other',
+];
 const CATEGORIES = [
   'Electronics',
   'Shopping',
@@ -50,6 +63,10 @@ const PAYMENT_METHODS = [
 export function CustomerDashboard() {
   const { data: analytics, isLoading, refetch } = usePersonalSpendingAnalytics();
   const { data: graphData } = useTransactionGraph();
+  const { data: paymentsSummary } = usePaymentsToOthersSummary();
+  const [selectedStore, setSelectedStore] = useState<string | null>(null);
+  const [hoveredTxIdx, setHoveredTxIdx] = useState<number | null>(null);
+  const { data: storeDrilldown } = useStoreDrilldown(selectedStore);
   const createPurchaseMutation = useCreatePersonalPurchase();
   const deletePurchaseMutation = useDeletePersonalPurchase();
 
@@ -274,6 +291,9 @@ export function CustomerDashboard() {
         </div>
       </div>
 
+      {/* Connected Banking App: Inflow Income Explorer (RBI AA) */}
+      <BankingIncomeExplorer />
+
       {/* Daily Cost Timeline Bar Chart */}
       <section className="rounded-xl border border-rule bg-canvas-raised p-5 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
@@ -339,6 +359,615 @@ export function CustomerDashboard() {
           </div>
         )}
       </section>
+
+      {/* Summary of Payments Made to Others (ML Payee Intelligence) */}
+      {paymentsSummary && (
+        <section className="rounded-xl border border-rule bg-canvas-raised p-5 shadow-sm space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-navy" />
+              <div>
+                <h2 className="text-base font-semibold text-ink">
+                  Summary of Payments Made to Others (अन्य को किए गए भुगतान का सारांश)
+                </h2>
+                <p className="text-xs text-ink-soft">
+                  Powered by Python <code className="font-mono text-navy">pandas</code> +{' '}
+                  <code className="font-mono text-navy">scikit-learn</code> (
+                  {paymentsSummary.ml_models_used.regression_model ?? 'RidgeRegression'} &amp; KMeans Payee Clustering)
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="rounded-md bg-canvas-sunk px-3 py-1 border border-rule">
+                Total Paid to Others:{' '}
+                <strong className="num font-bold text-ink">
+                  {formatINR(paymentsSummary.total_paid_to_others)}
+                </strong>
+              </span>
+              <span className="rounded-md bg-navy-tint px-3 py-1 border border-navy/20 text-navy">
+                ML 7d Projected Outflow:{' '}
+                <strong className="num font-bold">{formatINR(paymentsSummary.predicted_7d_outflow)}</strong>
+              </span>
+            </div>
+          </div>
+
+          {/* Executive Narrative Summary */}
+          <div className="rounded-lg border border-navy/20 bg-canvas-sunk p-3.5 text-xs text-ink leading-relaxed">
+            <strong className="text-navy">AI Executive Summary: </strong>
+            {paymentsSummary.ai_summary_text}
+          </div>
+
+          {/* Payee-Wise Summary Table */}
+          {paymentsSummary.payee_summary.length > 0 && (
+            <div className="overflow-x-auto rounded-lg border border-rule">
+              <table className="min-w-full text-xs">
+                <thead className="border-b border-rule bg-canvas-sunk text-left uppercase tracking-wider text-ink-soft">
+                  <tr>
+                    <th className="px-3 py-2.5 font-semibold">Recipient / Payee (भुगतान प्राप्तकर्ता)</th>
+                    <th className="px-3 py-2.5 font-semibold">Type</th>
+                    <th className="px-3 py-2.5 font-semibold">Primary Channel</th>
+                    <th className="px-3 py-2.5 font-semibold">ML Cluster Tier (KMeans)</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Payments</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Avg Ticket</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Total Paid &amp; Share</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-rule bg-canvas">
+                  {paymentsSummary.payee_summary.map((payee) => {
+                    const isFocusedStore =
+                      storeDrilldown?.selected_store.toLowerCase() === payee.payee_name.toLowerCase();
+                    return (
+                      <tr
+                        key={payee.payee_name}
+                        onClick={() => {
+                          setSelectedStore(payee.payee_name);
+                          setHoveredTxIdx(null);
+                        }}
+                        className={`cursor-pointer transition-colors ${
+                          isFocusedStore ? 'bg-navy-tint/60' : 'hover:bg-canvas-raised'
+                        }`}
+                        title={`Click to view graphical transactions from ${payee.payee_name}`}
+                      >
+                        <td className="px-3 py-2.5 font-bold text-ink flex items-center gap-1.5">
+                          <span>{payee.payee_name}</span>
+                          <span className="rounded bg-navy/10 px-1.5 py-0.5 text-[9px] font-semibold text-navy">
+                            View Graph ➔
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-ink-soft">{payee.payee_type}</td>
+                        <td className="px-3 py-2.5 text-ink-soft">{payee.primary_channel}</td>
+                        <td className="px-3 py-2.5">
+                          <span className="inline-block rounded-full bg-navy-tint px-2.5 py-0.5 text-[10px] font-semibold text-navy">
+                            {payee.ml_cluster_label}
+                          </span>
+                        </td>
+                        <td className="num px-3 py-2.5 text-right font-medium text-ink">
+                          {payee.payment_count}
+                        </td>
+                        <td className="num px-3 py-2.5 text-right text-ink-soft">
+                          {formatINR(payee.avg_payment)}
+                        </td>
+                        <td className="num px-3 py-2.5 text-right font-bold text-ink">
+                          {formatINRPrecise(payee.total_paid)}{' '}
+                          <span className="text-[10px] font-normal text-ink-soft">
+                            ({payee.share_percentage}%)
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Payment App / Channel Split Pills */}
+          {paymentsSummary.payment_app_summary.length > 0 && (
+            <div className="grid gap-2.5 sm:grid-cols-3 pt-1">
+              {paymentsSummary.payment_app_summary.map((ch) => (
+                <div
+                  key={ch.channel}
+                  className="rounded-lg border border-rule bg-canvas px-3.5 py-2.5 flex items-center justify-between text-xs"
+                >
+                  <div>
+                    <p className="font-semibold text-ink">{ch.channel}</p>
+                    <p className="text-[10px] text-ink-faint">{ch.transaction_count} payment(s)</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="num font-bold text-navy">{formatINR(ch.total_paid)}</p>
+                    <p className="text-[10px] text-ink-soft">{ch.percentage}% of total</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Store-Specific Graphical Transaction Explorer (Store Drill-Down) */}
+      {storeDrilldown && storeDrilldown.available_stores.length > 0 && (
+        <section className="rounded-xl border-2 border-navy/25 bg-canvas-raised p-5 shadow-sm space-y-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="rounded-lg bg-navy p-2 text-white">
+                <ShoppingBag className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-ink">
+                  Store-Specific Graphical Transaction Explorer (किसी विशेष स्टोर के लेन-देन का ग्राफ़)
+                </h2>
+                <p className="text-xs text-ink-soft">
+                  Select any store or merchant below to inspect every transaction, cumulative cost curve, UPI routing, and item breakdown graphically.
+                </p>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-bold text-emerald-900">
+              <Lock className="h-3.5 w-3.5 text-emerald-700" />
+              Viewing Store: {storeDrilldown.selected_store}
+            </span>
+          </div>
+
+          {/* Interactive Store Selector Bar */}
+          <div className="space-y-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-soft">
+              Choose Store / Merchant to Inspect Graphically:
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {storeDrilldown.available_stores.map((st) => {
+                const isActive =
+                  st.store_name.toLowerCase() === storeDrilldown.selected_store.toLowerCase();
+                return (
+                  <button
+                    key={st.store_name}
+                    type="button"
+                    onClick={() => {
+                      setSelectedStore(st.store_name);
+                      setHoveredTxIdx(null);
+                    }}
+                    className={`rounded-lg px-3.5 py-2 text-xs font-semibold transition-all flex items-center gap-2 border ${
+                      isActive
+                        ? 'bg-navy text-white border-navy shadow-sm'
+                        : 'bg-canvas text-ink hover:bg-canvas-sunk border-rule'
+                    }`}
+                  >
+                    <span>{st.store_name}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] num ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-canvas-sunk text-ink-soft'
+                      }`}
+                    >
+                      {formatINR(st.total_spent)} · {st.transaction_count} tx
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Selected Store KPI Strip */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-lg border border-rule bg-canvas p-3.5">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-ink-soft">
+                Total Spent at {storeDrilldown.selected_store}
+              </p>
+              <p className="num mt-1 text-xl font-extrabold text-navy">
+                {formatINRPrecise(storeDrilldown.total_spent)}
+              </p>
+              <p className="mt-0.5 text-[11px] text-ink-soft">
+                {storeDrilldown.share_of_wallet_pct}% of your total payments
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-rule bg-canvas p-3.5">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-ink-soft">
+                Transactions &amp; Avg Ticket
+              </p>
+              <p className="num mt-1 text-xl font-extrabold text-ink">
+                {storeDrilldown.transaction_count} Orders
+              </p>
+              <p className="mt-0.5 text-[11px] text-ink-soft">
+                Avg Cost: <strong className="num">{formatINR(storeDrilldown.avg_order_value)}</strong> / order
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-rule bg-canvas p-3.5">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-ink-soft">
+                Order Cost Range (Min – Max)
+              </p>
+              <p className="num mt-1 text-xl font-extrabold text-ink">
+                {formatINR(storeDrilldown.min_order_value)} – {formatINR(storeDrilldown.max_order_value)}
+              </p>
+              <p className="mt-0.5 text-[11px] text-ink-soft">
+                Store Type: {storeDrilldown.store_type}
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3.5">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-900">
+                ML Predicted Next Spend
+              </p>
+              <p className="num mt-1 text-xl font-extrabold text-emerald-900">
+                {formatINR(storeDrilldown.predicted_next_order)}
+              </p>
+              <p className="mt-0.5 text-[11px] text-emerald-800">
+                pandas EWMA trajectory for {storeDrilldown.selected_store}
+              </p>
+            </div>
+          </div>
+
+          {/* Dual-Layer SVG Chart: Order Cost Bars + Cumulative Spend Curve for Selected Store */}
+          {(() => {
+            const pts = storeDrilldown.transactions_timeline;
+            if (pts.length === 0) return null;
+            const maxCum = Math.max(...pts.map((p) => p.cumulative_amount), 1);
+            const svgW = 720;
+            const svgH = 220;
+            const padL = 54;
+            const padR = 28;
+            const padT = 24;
+            const padB = 42;
+            const plotW = svgW - padL - padR;
+            const plotH = svgH - padT - padB;
+            const stepX = pts.length > 1 ? plotW / pts.length : plotW;
+
+            const coords = pts.map((pt, idx) => {
+              const cx = padL + stepX * idx + stepX / 2;
+              const barH = Math.max(8, (pt.amount / maxCum) * plotH);
+              const barY = padT + plotH - barH;
+              const cumY = padT + plotH - (pt.cumulative_amount / maxCum) * plotH;
+              return { cx, barH, barY, cumY, pt, idx };
+            });
+
+            const linePath = coords
+              .map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.cx.toFixed(1)} ${c.cumY.toFixed(1)}`)
+              .join(' ');
+            const areaPath =
+              coords.length > 0
+                ? `${linePath} L ${coords[coords.length - 1].cx.toFixed(1)} ${(padT + plotH).toFixed(1)} L ${coords[0].cx.toFixed(1)} ${(padT + plotH).toFixed(1)} Z`
+                : '';
+
+            const activeIdx =
+              hoveredTxIdx !== null && hoveredTxIdx < pts.length ? hoveredTxIdx : pts.length - 1;
+            const activeTx = pts[activeIdx];
+
+            return (
+              <div className="grid gap-4 lg:grid-cols-3 items-stretch">
+                {/* Left 2 Columns: SVG Dual-Layer Graph */}
+                <div className="lg:col-span-2 rounded-xl border border-rule bg-canvas p-4 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-ink">
+                        {storeDrilldown.selected_store} — Order Cost Bars &amp; Cumulative Spend Curve
+                      </h3>
+                      <p className="text-[11px] text-ink-soft">
+                        Hover or click any bar/node to inspect that specific order from {storeDrilldown.selected_store}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px]">
+                      <span className="flex items-center gap-1 text-ink">
+                        <span className="h-2.5 w-2.5 rounded-xs bg-navy inline-block" /> Individual Order Cost
+                      </span>
+                      <span className="flex items-center gap-1 text-emerald-700 font-semibold">
+                        <span className="h-2.5 w-2.5 rounded-full bg-emerald-600 inline-block" /> Running Cumulative Spend
+                      </span>
+                    </div>
+                  </div>
+
+                  <svg
+                    viewBox={`0 0 ${svgW} ${svgH}`}
+                    className="w-full h-56 overflow-visible select-none"
+                    role="img"
+                    aria-label={`Transactions graph for ${storeDrilldown.selected_store}`}
+                  >
+                    <defs>
+                      <linearGradient id="storeCumGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#059669" stopOpacity="0.24" />
+                        <stop offset="100%" stopColor="#059669" stopOpacity="0.02" />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Horizontal Reference Grid Lines */}
+                    {[0, 0.5, 1].map((frac) => {
+                      const y = padT + plotH * (1 - frac);
+                      const val = Math.round(maxCum * frac);
+                      return (
+                        <g key={frac}>
+                          <line
+                            x1={padL}
+                            y1={y}
+                            x2={svgW - padR}
+                            y2={y}
+                            stroke="#E5E0D5"
+                            strokeDasharray="3 3"
+                          />
+                          <text
+                            x={padL - 6}
+                            y={y + 4}
+                            textAnchor="end"
+                            className="fill-ink-faint text-[10px] font-mono"
+                          >
+                            ₹{val.toLocaleString('en-IN')}
+                          </text>
+                        </g>
+                      );
+                    })}
+
+                    {/* Shaded Cumulative Area */}
+                    {areaPath && <path d={areaPath} fill="url(#storeCumGrad)" />}
+
+                    {/* Individual Order Cost Bars */}
+                    {coords.map((c) => {
+                      const isSelected = c.idx === activeIdx;
+                      const barW = Math.min(44, Math.max(18, stepX * 0.42));
+                      return (
+                        <g
+                          key={c.pt.id}
+                          className="cursor-pointer"
+                          onMouseEnter={() => setHoveredTxIdx(c.idx)}
+                          onClick={() => setHoveredTxIdx(c.idx)}
+                        >
+                          <rect
+                            x={c.cx - barW / 2}
+                            y={c.barY}
+                            width={barW}
+                            height={c.barH}
+                            rx={4}
+                            fill={isSelected ? '#059669' : '#1E3A8A'}
+                            opacity={isSelected ? 0.95 : 0.78}
+                          />
+                          <text
+                            x={c.cx}
+                            y={c.barY - 5}
+                            textAnchor="middle"
+                            className="fill-ink text-[10px] font-bold font-mono"
+                          >
+                            ₹{c.pt.amount.toLocaleString('en-IN')}
+                          </text>
+                          <text
+                            x={c.cx}
+                            y={padT + plotH + 15}
+                            textAnchor="middle"
+                            className="fill-ink-soft text-[10px] font-semibold"
+                          >
+                            {c.pt.date.slice(5)}
+                          </text>
+                          <text
+                            x={c.cx}
+                            y={padT + plotH + 28}
+                            textAnchor="middle"
+                            className="fill-ink-faint text-[9px] font-mono"
+                          >
+                            #{c.pt.order_id.slice(0, 7)}
+                          </text>
+                        </g>
+                      );
+                    })}
+
+                    {/* Cumulative Spend Line & Nodes */}
+                    {linePath && (
+                      <path
+                        d={linePath}
+                        fill="none"
+                        stroke="#059669"
+                        strokeWidth={2.5}
+                        strokeLinecap="round"
+                      />
+                    )}
+                    {coords.map((c) => {
+                      const isSelected = c.idx === activeIdx;
+                      return (
+                        <circle
+                          key={`dot-${c.pt.id}`}
+                          cx={c.cx}
+                          cy={c.cumY}
+                          r={isSelected ? 6 : 4}
+                          fill={isSelected ? '#047857' : '#10B981'}
+                          stroke="#FFFFFF"
+                          strokeWidth={2}
+                          className="cursor-pointer"
+                          onMouseEnter={() => setHoveredTxIdx(c.idx)}
+                          onClick={() => setHoveredTxIdx(c.idx)}
+                        />
+                      );
+                    })}
+                  </svg>
+                </div>
+
+                {/* Right Column: Interactive Selected Order Inspector Card */}
+                {activeTx && (
+                  <div className="rounded-xl border border-rule bg-canvas p-4 flex flex-col justify-between space-y-3">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="rounded bg-navy-tint px-2 py-0.5 text-[10px] font-bold text-navy">
+                          Order #{activeIdx + 1} of {pts.length} at {storeDrilldown.selected_store}
+                        </span>
+                        <span className="text-[11px] font-semibold text-ink-soft">
+                          {activeTx.date}
+                        </span>
+                      </div>
+
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-ink-faint">
+                          Order Cost Incurred
+                        </p>
+                        <p className="num text-2xl font-extrabold text-ink">
+                          {formatINRPrecise(activeTx.amount)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg bg-canvas-sunk p-2.5 border border-rule space-y-1 text-xs">
+                        <p className="font-semibold text-ink flex items-center gap-1">
+                          <Lock className="h-3 w-3 text-emerald-600 shrink-0" />
+                          <span>{activeTx.items_note}</span>
+                        </p>
+                        <p className="text-[11px] font-mono text-ink-soft">
+                          Order ID: {activeTx.order_id}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 pt-2 border-t border-rule text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-ink-soft">Paid Via:</span>
+                        <span className="font-semibold text-ink">{activeTx.payment_method}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-ink-soft">Category:</span>
+                        <span className="font-semibold text-ink">{activeTx.category}</span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 border-t border-dashed border-rule">
+                        <span className="font-semibold text-emerald-800">
+                          Cumulative at {storeDrilldown.selected_store}:
+                        </span>
+                        <span className="num font-extrabold text-emerald-700">
+                          {formatINRPrecise(activeTx.cumulative_amount)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Store-to-Orders Directed Money Flow Subgraph + Payment & Category Split */}
+          <div className="grid gap-4 lg:grid-cols-3">
+            {/* Store Flow Graph: Bank -> UPI Method -> Selected Store -> Individual Orders */}
+            <div className="lg:col-span-2 rounded-xl border border-rule bg-canvas p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-ink flex items-center gap-1.5">
+                  <Network className="h-4 w-4 text-navy" />
+                  <span>
+                    Store Money-Flow Graph: Bank A/c ➔ UPI App ➔ {storeDrilldown.selected_store} ➔ Orders
+                  </span>
+                </h3>
+                <span className="text-[10px] text-ink-soft">
+                  {storeDrilldown.store_flow_edges.length} verified flow edges
+                </span>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3 items-center pt-1">
+                {/* Node 1: UPI Gateways used for this store */}
+                <div className="space-y-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-ink-soft">
+                    1. UPI App(s) Used
+                  </p>
+                  {storeDrilldown.store_flow_nodes
+                    .filter((n) => n.type === 'GATEWAY')
+                    .map((gw) => (
+                      <div
+                        key={gw.id}
+                        className="rounded-lg border border-rule bg-canvas-raised p-2.5 text-xs shadow-2xs"
+                      >
+                        <div className="flex items-center justify-between font-bold text-ink">
+                          <span>{gw.label}</span>
+                          <ArrowRight className="h-3.5 w-3.5 text-navy" />
+                        </div>
+                        <p className="num text-navy font-extrabold mt-0.5">
+                          {formatINR(gw.total_volume)}
+                        </p>
+                        <p className="text-[10px] text-ink-faint">{gw.subtext}</p>
+                      </div>
+                    ))}
+                </div>
+
+                {/* Node 2: Selected Store Hub */}
+                <div className="rounded-xl border-2 border-navy bg-navy-tint/40 p-3.5 text-center space-y-1">
+                  <span className="rounded-full bg-navy px-2.5 py-0.5 text-[9px] font-bold uppercase text-white">
+                    2. Selected Store Hub
+                  </span>
+                  <h4 className="text-sm font-extrabold text-ink pt-1">
+                    {storeDrilldown.selected_store}
+                  </h4>
+                  <p className="num text-lg font-extrabold text-navy">
+                    {formatINRPrecise(storeDrilldown.total_spent)}
+                  </p>
+                  <p className="text-[10px] text-ink-soft">
+                    {storeDrilldown.transaction_count} settled transactions
+                  </p>
+                </div>
+
+                {/* Node 3: Individual Order Nodes at this Store */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-ink-soft">
+                    3. Store Order Nodes
+                  </p>
+                  {storeDrilldown.store_flow_nodes
+                    .filter((n) => n.type === 'ORDER')
+                    .map((ordNode, oIdx) => (
+                      <div
+                        key={ordNode.id}
+                        onClick={() => setHoveredTxIdx(oIdx)}
+                        className="cursor-pointer rounded-lg border border-rule bg-canvas-raised px-2.5 py-1.5 text-xs hover:border-emerald-500 transition-colors flex items-center justify-between"
+                      >
+                        <div className="truncate pr-2">
+                          <p className="font-mono text-[11px] font-bold text-ink truncate">
+                            {ordNode.label}
+                          </p>
+                          <p className="text-[10px] text-ink-faint truncate">{ordNode.subtext}</p>
+                        </div>
+                        <span className="num font-bold text-emerald-700 shrink-0">
+                          {formatINR(ordNode.total_volume)}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Store Payment & Category Breakdown */}
+            <div className="rounded-xl border border-rule bg-canvas p-4 space-y-4">
+              <div className="space-y-2">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-ink">
+                  Payment Apps Used at {storeDrilldown.selected_store}
+                </h3>
+                {storeDrilldown.payment_method_split.map((m) => (
+                  <div key={m.method} className="space-y-1 text-xs">
+                    <div className="flex justify-between">
+                      <span className="font-semibold text-ink">
+                        {m.method} <span className="text-ink-faint">({m.count})</span>
+                      </span>
+                      <span className="num font-bold text-navy">
+                        {formatINR(m.amount)} ({m.percentage}%)
+                      </span>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-canvas-sunk overflow-hidden">
+                      <div
+                        style={{ width: `${Math.min(100, m.percentage)}%` }}
+                        className="h-full bg-navy rounded-full"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-2 pt-2 border-t border-rule">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-ink">
+                  Categories Bought at {storeDrilldown.selected_store}
+                </h3>
+                {storeDrilldown.category_split.map((c) => (
+                  <div key={c.category} className="space-y-1 text-xs">
+                    <div className="flex justify-between">
+                      <span className="font-semibold text-ink">
+                        {c.category} <span className="text-ink-faint">({c.count})</span>
+                      </span>
+                      <span className="num font-bold text-emerald-700">
+                        {formatINR(c.amount)} ({c.percentage}%)
+                      </span>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-canvas-sunk overflow-hidden">
+                      <div
+                        style={{ width: `${Math.min(100, c.percentage)}%` }}
+                        className="h-full bg-emerald-600 rounded-full"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Real-Time Payment Routing Network & Transaction Flow Graph */}
       <section className="rounded-xl border border-rule bg-canvas-raised p-5 shadow-sm space-y-4">
@@ -877,6 +1506,30 @@ export function CustomerDashboard() {
                     className="w-full rounded-lg border border-rule bg-canvas px-3 py-1.5 text-ink focus:border-navy focus:outline-none"
                   />
                 </div>
+
+                {/* Live Pre-Transaction Cost & Store Impact Preview */}
+                {Number(amount) > 0 && (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between font-bold text-emerald-950">
+                      <span className="flex items-center gap-1">
+                        <ShieldCheck className="h-3.5 w-3.5 text-emerald-700" />
+                        Live Transaction Cost &amp; Safety Preview ({marketplace})
+                      </span>
+                      <span className="num">{formatINRPrecise(Number(amount))}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 pt-1 text-[11px] text-emerald-900">
+                      <div>
+                        Today&apos;s Spend Impact:{' '}
+                        <strong className="num">
+                          {formatINR(todayCost)} ➔ {formatINR(todayCost + Number(amount))}
+                        </strong>
+                      </div>
+                      <div>
+                        UPI MDR / Gateway Fee: <strong className="num">₹0.00 (Zero-Fee NPCI)</strong>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Submit Buttons */}
                 <div className="flex items-center justify-end gap-2 pt-3 border-t border-rule">

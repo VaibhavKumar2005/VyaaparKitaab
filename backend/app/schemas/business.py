@@ -24,6 +24,12 @@ class CustomerCreate(BaseModel):
     business_id: UUID
 
 
+class CustomerUpdate(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+
+
 class CustomerRead(CustomerCreate):
     id: UUID
     created_at: datetime
@@ -37,6 +43,15 @@ class ProductCreate(BaseModel):
     cost_price: float | None = None
     stock_qty: float = 0
     business_id: UUID
+
+
+class ProductUpdate(BaseModel):
+    name: str | None = None
+    sku: str | None = None
+    unit: str | None = None
+    selling_price: float | None = None
+    cost_price: float | None = None
+    stock_qty: float | None = None
 
 
 class ProductRead(ProductCreate):

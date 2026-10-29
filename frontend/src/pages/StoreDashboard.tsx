@@ -1,9 +1,10 @@
 import { Link } from 'react-router-dom';
-import { AlertTriangle, TrendingUp, Wallet } from 'lucide-react';
+import { AlertTriangle, Sparkles, TrendingUp, Wallet } from 'lucide-react';
+import { BankingIncomeExplorer } from '../components/BankingIncomeExplorer';
 import { ErrorState } from '../components/ui/ErrorState';
 import { LoadingState } from '../components/ui/LoadingState';
 import { StatusPill, paymentState } from '../components/StatusPill';
-import { useStoreDashboard } from '../hooks/useDashboard';
+import { useAiForecast, useStoreDashboard } from '../hooks/useDashboard';
 import { useInvoices } from '../hooks/useInvoices';
 import { useProducts } from '../hooks/useBusinessData';
 import { formatDate, formatINR, formatINRPrecise } from '../lib/format';
@@ -12,6 +13,7 @@ export function StoreDashboard() {
   const dash = useStoreDashboard();
   const inv = useInvoices();
   const prod = useProducts();
+  const ai = useAiForecast();
 
   if (dash.isPending || inv.isPending) return <LoadingState label="Loading dashboard…" />;
   if (dash.isError || inv.isError || !dash.data || !inv.data) {
@@ -94,6 +96,9 @@ export function StoreDashboard() {
           emphasis={dash.data.lowStockItems > 0}
         />
       </section>
+
+      {/* Connected Banking App: Inflow Income Explorer (RBI AA) */}
+      <BankingIncomeExplorer />
 
       {/* Roznamcha: Payment Mode Collection Split & Inventory Health */}
       <section className="grid gap-6 lg:grid-cols-3">
@@ -217,6 +222,103 @@ export function StoreDashboard() {
           </Link>
         </div>
       </section>
+
+      {/* AI/ML Demand & Cash-Flow Forecasting Section */}
+      {ai.data && (
+        <section className="rounded-lg border border-rule bg-canvas-raised p-5 space-y-4" aria-label="AI Demand Forecast">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-ink flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-navy" />
+                AI Demand & Cash-Flow Forecast (AI मांग एवं नकदी पूर्वानुमान)
+              </h2>
+              <p className="text-xs text-ink-soft mt-0.5">
+                Chronological 80/20 validation • Active Model:{' '}
+                <strong className="text-navy">{ai.data.revenue_model.selected_model}</strong>
+                {ai.data.revenue_model.validation_metrics[ai.data.revenue_model.selected_model] && (
+                  <span>
+                    {' '}
+                    (RMSE:{' '}
+                    {ai.data.revenue_model.validation_metrics[ai.data.revenue_model.selected_model].rmse}, MAE:{' '}
+                    {ai.data.revenue_model.validation_metrics[ai.data.revenue_model.selected_model].mae})
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="rounded-md bg-canvas-sunk px-3 py-1.5 border border-rule text-xs">
+              <span className="text-ink-soft">Projected Next 7d Revenue: </span>
+              <strong className="num text-navy font-bold">
+                {formatINR(ai.data.revenue_model.projected_7d_revenue)}
+              </strong>
+            </div>
+          </div>
+
+          {ai.data.insights.length > 0 && (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {ai.data.insights.slice(0, 2).map((insight, idx) => (
+                <div
+                  key={idx}
+                  className="rounded-md border border-rule bg-canvas-sunk px-3 py-2 text-xs text-ink flex items-start gap-2"
+                >
+                  <TrendingUp className="h-3.5 w-3.5 text-navy shrink-0 mt-0.5" />
+                  <span>{insight}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {ai.data.inventory_forecasts.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-xs">
+                <thead className="border-b border-rule bg-canvas-sunk text-left uppercase tracking-wider text-ink-soft">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">SKU / Item</th>
+                    <th className="px-3 py-2 text-right font-semibold">Stock</th>
+                    <th className="px-3 py-2 text-right font-semibold">7d Forecast</th>
+                    <th className="px-3 py-2 text-right font-semibold">Est. Stockout</th>
+                    <th className="px-3 py-2 text-right font-semibold">Suggested Reorder</th>
+                    <th className="px-3 py-2 text-right font-semibold">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-rule">
+                  {ai.data.inventory_forecasts.slice(0, 5).map((item) => (
+                    <tr key={item.product_id} className="hover:bg-canvas">
+                      <td className="px-3 py-2 font-medium text-ink">
+                        {item.name} <span className="text-ink-faint">({item.sku})</span>
+                      </td>
+                      <td className="num px-3 py-2 text-right text-ink-soft">
+                        {item.current_stock} {item.unit}
+                      </td>
+                      <td className="num px-3 py-2 text-right font-medium text-ink">
+                        {item.forecast_7d_units} {item.unit}
+                      </td>
+                      <td className="num px-3 py-2 text-right text-ink-soft">
+                        {item.days_to_stockout >= 900 ? '30+ days' : `${item.days_to_stockout} days`}
+                      </td>
+                      <td className="num px-3 py-2 text-right font-semibold text-navy">
+                        +{item.recommended_reorder_qty} {item.unit}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <span
+                          className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase ${
+                            item.urgency === 'CRITICAL'
+                              ? 'bg-due-tint text-due'
+                              : item.urgency === 'WARNING'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-positive-tint text-positive'
+                          }`}
+                        >
+                          {item.urgency}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       <section aria-labelledby="recent">
         <div className="mb-3 flex items-baseline justify-between">

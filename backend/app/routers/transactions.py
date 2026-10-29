@@ -1,16 +1,22 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from uuid import UUID
 
 from app.cores.database import get_db
 from app.models.business import Business, Customer, Product
 from app.models.transaction import Invoice, InvoiceItem
-from app.schemas.transaction import CustomerInvoiceRead, InvoiceCreate, InvoiceRead, SpendingSummary
+from app.models.user import User
+from app.schemas.transaction import (
+    CustomerInvoiceRead,
+    InvoiceCreate,
+    InvoiceRead,
+    SpendingSummary,
+)
 from app.services.auth import get_current_user
 from app.services.spending import classify_transaction
-from app.models.user import User
 
 router = APIRouter(tags=["transactions"])
 
@@ -107,9 +113,10 @@ async def create_invoice(
                 product.stock_qty = float(product.stock_qty) + qty
 
     await db.commit()
-    await db.refresh(invoice)
-    invoice.items = item_models
-    return invoice
+    refreshed = await db.execute(
+        select(Invoice).options(selectinload(Invoice.items)).where(Invoice.id == invoice.id)
+    )
+    return refreshed.scalar_one()
 
 
 @router.get("/invoices", response_model=list[InvoiceRead])
@@ -126,9 +133,22 @@ async def list_invoices(db: AsyncSession = Depends(get_db), user: User = Depends
 @router.get("/portal/my-bills", response_model=list[CustomerInvoiceRead])
 async def list_customer_bills(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     """Strictly isolated customer endpoint: returns only SALE invoices belonging to the customer."""
-    customer_ids = select(Customer.id).where(
-        (Customer.phone == user.phone) | (Customer.email == user.email)
-    )
+    from sqlalchemy import or_
+
+    from app.services.encryption import blind_email, blind_phone
+
+    p_hash = blind_phone(user.phone)
+    e_hash = blind_email(user.email)
+    conditions = [
+        Customer.phone == user.phone,
+        Customer.email == user.email,
+    ]
+    if p_hash:
+        conditions.append(Customer.phone_hash == p_hash)
+    if e_hash:
+        conditions.append(Customer.email_hash == e_hash)
+
+    customer_ids = select(Customer.id).where(or_(*conditions))
     result = await db.execute(
         select(Invoice)
         .options(selectinload(Invoice.items))
@@ -175,8 +195,10 @@ async def update_invoice_status(
     if clean_status == "PAID":
         invoice.paid_amount = invoice.total_amount
     await db.commit()
-    await db.refresh(invoice)
-    return invoice
+    refreshed = await db.execute(
+        select(Invoice).options(selectinload(Invoice.items)).where(Invoice.id == invoice.id)
+    )
+    return refreshed.scalar_one()
 
 
 @router.get("/dashboard/store")

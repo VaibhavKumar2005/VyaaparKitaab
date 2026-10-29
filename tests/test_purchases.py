@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import httpx
@@ -9,9 +9,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/vyaapardb")
 os.environ.setdefault("ENV", "testing")
 
-from app.cores.database import get_db
 from app.main import app
-from app.models.purchase import PersonalPurchase
 from app.models.user import User
 from app.services.auth import get_current_user
 from app.services.encryption import blind_index, decrypt_field, encrypt_field
@@ -118,7 +116,7 @@ async def test_personal_purchases_crud_and_isolation():
     try:
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             # 1. Create a purchase today for user_a
-            today_iso = datetime.now(timezone.utc).isoformat()
+            today_iso = datetime.now(UTC).isoformat()
             order_id = f"408-{uuid4().hex[:7]}-{uuid4().hex[:7]}"
             purchase_data = {
                 "marketplace": "Amazon",
@@ -165,6 +163,27 @@ async def test_personal_purchases_crud_and_isolation():
             assert any(n["id"] == "gpay" for n in graph_data["nodes"])
             assert any(n["id"] == "mkt_amazon" for n in graph_data["nodes"])
             assert len(graph_data["edges"]) >= 2
+
+            # 4.6 Summary of Payments Made to Others (ML Payee Intelligence)
+            summary_res = await client.get("/api/v1/purchases/payments-to-others")
+            assert summary_res.status_code == 200
+            summary_data = summary_res.json()
+            assert summary_data["total_paid_to_others"] >= 1499.0
+            assert summary_data["total_transactions"] >= 1
+            assert any(p["payee_name"] == "Amazon" for p in summary_data["payee_summary"])
+            assert "regression_model" in summary_data["ml_models_used"]
+
+            # 4.7 Store-Specific Graphical Transaction Drill-Down (?store=Amazon)
+            drilldown_res = await client.get("/api/v1/purchases/store-drilldown?store=Amazon")
+            assert drilldown_res.status_code == 200
+            drilldown_data = drilldown_res.json()
+            assert drilldown_data["selected_store"] == "Amazon"
+            assert drilldown_data["total_spent"] >= 1499.0
+            assert drilldown_data["transaction_count"] >= 1
+            assert len(drilldown_data["transactions_timeline"]) >= 1
+            assert drilldown_data["transactions_timeline"][-1]["cumulative_amount"] == drilldown_data["total_spent"]
+            assert any(n["id"] == "store_hub" for n in drilldown_data["store_flow_nodes"])
+            assert len(drilldown_data["store_flow_edges"]) >= 2
 
             # 5. Multitenant isolation: Switch user to User B -> User B must NOT see User A's purchases
             app.dependency_overrides[get_current_user] = lambda: user_b
