@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowDownLeft,
   Building2,
@@ -10,14 +10,26 @@ import {
   ShieldCheck,
   Smartphone,
   TrendingUp,
+  Upload,
   XCircle,
 } from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import {
   useIncomeStream,
   useIncomeGraph,
   useInitiateBankingConsent,
   useRevokeBankingConsent,
+  useImportStatement,
 } from '../hooks/useBankingIncome';
+import { usePaymentStream } from '../hooks/usePaymentStream';
 import { formatINR, formatINRPrecise } from '../lib/format';
 
 const SUPPORTED_BANKS = [
@@ -33,13 +45,128 @@ export function BankingIncomeExplorer() {
   const { data: graphData } = useIncomeGraph();
   const initiateConsentMutation = useInitiateBankingConsent();
   const revokeConsentMutation = useRevokeBankingConsent();
+  const importStatementMutation = useImportStatement();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Real-time payment stream connection with single fallback refetch on reconnect
+  usePaymentStream({
+    url: '/streams/payments',
+    onReconnect: () => {
+      void refetch();
+    },
+  });
 
   const [selectedBankId, setSelectedBankId] = useState<string>('sbi_yono');
   const [showConsentModal, setShowConsentModal] = useState<boolean>(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
+  // 2-step AA Consent OTP Verification state
+  const [aaPhone, setAaPhone] = useState<string>('9876543210');
+  const [aaEmail, setAaEmail] = useState<string>('');
+  const [aaOtpSent, setAaOtpSent] = useState<boolean>(false);
+  const [aaOtpCode, setAaOtpCode] = useState<string>('');
+  const [aaOtpHint, setAaOtpHint] = useState<string>('');
+  const [aaError, setAaError] = useState<string | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    importStatementMutation.mutate(file, {
+      onSuccess: (res) => {
+        setSuccessToast(
+          `Imported ${res.imported_count} real transactions (${res.credits_count} credits, ${res.debits_count} debits) from ${res.filename}!`
+        );
+        setTimeout(() => setSuccessToast(null), 6000);
+      },
+      onError: (err) => {
+        setSuccessToast(err instanceof Error ? err.message : 'Statement import failed');
+        setTimeout(() => setSuccessToast(null), 6000);
+      },
+    });
+    e.target.value = '';
+  };
+
+  const handleSendConsentOtp = async () => {
+    setAaError(null);
+    setAaOtpCode('');
+    const boundTarget = aaEmail.trim() || aaPhone.trim();
+    try {
+      const params = new URLSearchParams({
+        phone: boundTarget,
+        purpose: 'AA_CONSENT',
+      });
+      const res = await fetch(`/api/v1/auth/otp/send?${params.toString()}`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Failed to send OTP' }));
+        throw new Error(err.detail || 'Failed to send OTP');
+      }
+      const data = await res.json();
+      if (data.channel === 'email') {
+        setAaOtpHint(`OTP sent to ${boundTarget} via Gmail SMTP`);
+      } else if (data.dev_otp) {
+        setAaOtpHint(`OTP generated: ${data.dev_otp}`);
+      } else {
+        setAaOtpHint('Enter 6-digit OTP');
+      }
+      setAaOtpSent(true);
+    } catch (err) {
+      setAaError(err instanceof Error ? err.message : 'Failed to send OTP');
+    }
+  };
+
+  const handleVerifyAndConnect = async () => {
+    setAaError(null);
+    if (!aaOtpCode || aaOtpCode.length < 6) {
+      setAaError('Please enter the 6-digit OTP');
+      return;
+    }
+    const boundTarget = aaEmail.trim() || aaPhone.trim();
+    try {
+      const verifyParams = new URLSearchParams({
+        phone: boundTarget,
+        otp: aaOtpCode.trim(),
+        purpose: 'AA_CONSENT',
+      });
+      const verifyRes = await fetch(`/api/v1/auth/otp/verify?${verifyParams.toString()}`, {
+        method: 'POST',
+      });
+      if (!verifyRes.ok) {
+        const err = await verifyRes.json().catch(() => ({ detail: 'Invalid or expired OTP' }));
+        throw new Error(err.detail || 'Invalid or expired OTP');
+      }
+      handleConnectBank(selectedBankId);
+      setAaOtpSent(false);
+      setAaOtpCode('');
+    } catch (err) {
+      setAaError(err instanceof Error ? err.message : 'OTP verification failed');
+    }
+  };
+
   const activeConsent = incomeData?.active_consent;
   const isConnected = incomeData?.is_connected && activeConsent?.status === 'APPROVED';
+
+  const monthlyTrend = incomeData?.monthly_trend || [];
+  const [throttledTrend, setThrottledTrend] = useState(monthlyTrend);
+  const lastRedrawTime = useRef<number>(0);
+  const pendingTrend = useRef(monthlyTrend);
+
+  // Throttle live redraws to ~1 second and disable entry animations
+  useEffect(() => {
+    pendingTrend.current = monthlyTrend;
+    const now = Date.now();
+    if (now - lastRedrawTime.current >= 1000) {
+      lastRedrawTime.current = now;
+      setThrottledTrend(monthlyTrend);
+    } else {
+      const timer = setTimeout(() => {
+        lastRedrawTime.current = Date.now();
+        setThrottledTrend(pendingTrend.current);
+      }, 1000 - (now - lastRedrawTime.current));
+      return () => clearTimeout(timer);
+    }
+  }, [monthlyTrend]);
 
   const handleConnectBank = (fipId: string) => {
     setSelectedBankId(fipId);
@@ -48,8 +175,15 @@ export function BankingIncomeExplorer() {
       {
         onSuccess: (data) => {
           setShowConsentModal(false);
-          setSuccessToast(`Successfully connected ${data.fip_name} via RBI Account Aggregator!`);
-          setTimeout(() => setSuccessToast(null), 5000);
+          if (data.status === 'PENDING' && data.redirect_url) {
+            setSuccessToast(
+              `Consent initiated (${data.consent_id}). Complete approval at Setu AA: ${data.redirect_url}`
+            );
+            window.open(data.redirect_url, '_blank', 'noopener,noreferrer');
+          } else {
+            setSuccessToast(`Successfully connected ${data.fip_name} via RBI Account Aggregator!`);
+          }
+          setTimeout(() => setSuccessToast(null), 6000);
         },
       }
     );
@@ -71,9 +205,6 @@ export function BankingIncomeExplorer() {
       </div>
     );
   }
-
-  const monthlyTrend = incomeData.monthly_trend || [];
-  const maxMonthVal = Math.max(...monthlyTrend.map((m) => m.total_income), 1);
 
   return (
     <section className="rounded-2xl border-2 border-emerald-500/30 bg-canvas-raised p-5 shadow-sm space-y-6">
@@ -108,8 +239,33 @@ export function BankingIncomeExplorer() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {isConnected ? (
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.json"
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importStatementMutation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-navy bg-canvas px-3 py-1.5 text-xs font-bold text-navy hover:bg-navy-tint transition-colors"
+            title="Upload real Bank, Google Pay, PhonePe, or Paytm CSV/JSON statement"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            {importStatementMutation.isPending ? 'Importing…' : 'Import Statement (CSV/JSON)'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowConsentModal(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 shadow-xs transition-colors"
+          >
+            <Smartphone className="h-3.5 w-3.5" />
+            {isConnected ? 'Switch / Verify Bank AA' : 'Connect Banking App'}
+          </button>
+          {isConnected && (
             <button
               type="button"
               onClick={handleRevoke}
@@ -118,16 +274,7 @@ export function BankingIncomeExplorer() {
               title="Revoke consent anytime as per DPDP Act"
             >
               <XCircle className="h-3.5 w-3.5" />
-              Disconnect App
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowConsentModal(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 shadow-xs transition-colors"
-            >
-              <Smartphone className="h-3.5 w-3.5" />
-              Connect Banking App
+              Disconnect
             </button>
           )}
           <button
@@ -345,29 +492,59 @@ export function BankingIncomeExplorer() {
             <span className="text-[10px] text-ink-soft">Aggregated by month</span>
           </div>
 
-          <div className="space-y-3 pt-2">
-            {monthlyTrend.map((m) => {
-              const heightPct = Math.max(16, Math.round((m.total_income / maxMonthVal) * 100));
-              return (
-                <div key={m.month} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-semibold text-ink">{m.month}</span>
-                    <span className="num font-bold text-emerald-700">
-                      +{formatINRPrecise(m.total_income)}{' '}
-                      <span className="text-[10px] font-normal text-ink-soft">
-                        ({m.transaction_count} credits)
-                      </span>
-                    </span>
-                  </div>
-                  <div className="h-2.5 w-full rounded-full bg-canvas-sunk overflow-hidden border border-rule">
-                    <div
-                      style={{ width: `${heightPct}%` }}
-                      className="h-full bg-emerald-600 rounded-full transition-all"
-                    />
-                  </div>
-                </div>
-              );
-            })}
+          {/* Live Stream Responsive Recharts Bar Chart */}
+          <div className="h-44 w-full pt-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={throttledTrend}
+                margin={{ top: 8, right: 8, left: -20, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                <XAxis
+                  dataKey="month"
+                  tick={{ fontSize: 11, fill: '#64748B' }}
+                  tickLine={false}
+                  axisLine={{ stroke: '#CBD5E1' }}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: '#64748B' }}
+                  tickLine={false}
+                  axisLine={{ stroke: '#CBD5E1' }}
+                  tickFormatter={(val: number) => `₹${val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val}`}
+                />
+                <Tooltip
+                  formatter={(val: unknown) => [formatINRPrecise(Number(val) || 0), 'Income']}
+                  labelFormatter={(label) => `Month: ${label}`}
+                  contentStyle={{
+                    backgroundColor: '#FFFFFF',
+                    borderRadius: '8px',
+                    border: '1px solid #E2E8F0',
+                    fontSize: '12px',
+                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                  }}
+                />
+                <Bar
+                  dataKey="total_income"
+                  fill="#059669"
+                  isAnimationActive={false}
+                  radius={[4, 4, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="space-y-2 pt-1 border-t border-rule/60">
+            {throttledTrend.map((m) => (
+              <div key={m.month} className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-ink">{m.month}</span>
+                <span className="num font-bold text-emerald-700">
+                  +{formatINRPrecise(m.total_income)}{' '}
+                  <span className="text-[10px] font-normal text-ink-soft">
+                    ({m.transaction_count} credits)
+                  </span>
+                </span>
+              </div>
+            ))}
           </div>
 
           {/* Category Split */}
@@ -448,7 +625,7 @@ export function BankingIncomeExplorer() {
         </div>
       </div>
 
-      {/* Modal: Connect Banking App */}
+      {/* Modal: Connect Banking App with 2-Step OTP Consent Verification */}
       {showConsentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-rule bg-canvas-raised p-6 shadow-2xl space-y-4">
@@ -459,7 +636,11 @@ export function BankingIncomeExplorer() {
               </div>
               <button
                 type="button"
-                onClick={() => setShowConsentModal(false)}
+                onClick={() => {
+                  setShowConsentModal(false);
+                  setAaOtpSent(false);
+                  setAaError(null);
+                }}
                 className="text-ink-soft hover:text-ink text-sm font-bold"
               >
                 ✕
@@ -467,25 +648,83 @@ export function BankingIncomeExplorer() {
             </div>
 
             <p className="text-xs text-ink-soft leading-relaxed">
-              Select your bank below. You will be redirected to authenticate on your own banking app.
-              <strong> VyaparKitaab never requests, accesses, or stores your bank account number or password.</strong>
+              Select your FIP bank below and verify your consent via 6-digit OTP (delivered to your Gmail SMTP inbox).
+              <strong> VyaparKitaab never asks for or stores your bank account number or password.</strong>
             </p>
 
-            <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
               {SUPPORTED_BANKS.map((b) => (
                 <button
                   key={b.id}
                   type="button"
-                  onClick={() => handleConnectBank(b.id)}
-                  className="w-full flex items-center justify-between rounded-xl border border-rule bg-canvas p-3 text-xs font-semibold hover:border-emerald-500 hover:bg-canvas-sunk transition-all"
+                  onClick={() => setSelectedBankId(b.id)}
+                  className={`flex items-center gap-2 rounded-lg border p-2.5 text-xs font-semibold transition-all ${
+                    selectedBankId === b.id
+                      ? 'border-navy bg-navy-tint text-navy'
+                      : 'border-rule bg-canvas text-ink hover:bg-canvas-sunk'
+                  }`}
                 >
-                  <div className="flex items-center gap-2.5">
-                    <span className={`h-3 w-3 rounded-full ${b.color}`} />
-                    <span className="text-ink font-bold">{b.fullName}</span>
-                  </div>
-                  <span className="text-emerald-700 font-bold">Connect ➔</span>
+                  <span className={`h-2.5 w-2.5 rounded-full ${b.color}`} />
+                  <span className="truncate font-bold">{b.name}</span>
                 </button>
               ))}
+            </div>
+
+            <div className="space-y-2.5 pt-1">
+              <div>
+                <label className="text-xs font-semibold text-ink">Linked Mobile Number</label>
+                <input
+                  type="tel"
+                  maxLength={10}
+                  value={aaPhone}
+                  onChange={(e) => setAaPhone(e.target.value)}
+                  placeholder="9876543210"
+                  className="mt-1 w-full rounded border border-rule bg-canvas px-3 py-2 text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-ink">Email for Real OTP Verification (Gmail SMTP)</label>
+                <input
+                  type="email"
+                  value={aaEmail}
+                  onChange={(e) => setAaEmail(e.target.value)}
+                  placeholder="yourname@gmail.com"
+                  className="mt-1 w-full rounded border border-rule bg-canvas px-3 py-2 text-xs"
+                />
+              </div>
+
+              {!aaOtpSent ? (
+                <button
+                  type="button"
+                  onClick={handleSendConsentOtp}
+                  className="w-full rounded-lg bg-navy px-4 py-2.5 text-xs font-bold text-white hover:bg-navy-dark"
+                >
+                  Send Consent Verification OTP
+                </button>
+              ) : (
+                <div className="space-y-2 rounded-lg border border-navy/30 bg-navy-tint p-3">
+                  <div className="text-[11px] font-semibold text-navy">{aaOtpHint}</div>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={aaOtpCode}
+                    onChange={(e) => setAaOtpCode(e.target.value)}
+                    placeholder="Enter 6-digit OTP"
+                    className="num w-full rounded border border-rule bg-canvas-raised px-3 py-2 text-center text-base font-bold tracking-widest"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleVerifyAndConnect}
+                    className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700"
+                  >
+                    Verify OTP &amp; Authorize Read-Only Consent
+                  </button>
+                </div>
+              )}
+
+              {aaError && (
+                <p className="rounded bg-due-tint p-2 text-xs text-due">{aaError}</p>
+              )}
             </div>
 
             <div className="rounded-lg bg-emerald-50/70 p-2.5 border border-emerald-200 text-[11px] text-emerald-900 flex items-start gap-2">

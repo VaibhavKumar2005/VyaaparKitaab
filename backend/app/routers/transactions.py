@@ -16,6 +16,7 @@ from app.schemas.transaction import (
     SpendingSummary,
 )
 from app.services.auth import get_current_user
+from app.services.customer_link import linked_customer_ids
 from app.services.spending import classify_transaction
 
 router = APIRouter(tags=["transactions"])
@@ -133,31 +134,34 @@ async def list_invoices(db: AsyncSession = Depends(get_db), user: User = Depends
 @router.get("/portal/my-bills", response_model=list[CustomerInvoiceRead])
 async def list_customer_bills(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     """Strictly isolated customer endpoint: returns only SALE invoices belonging to the customer."""
-    from sqlalchemy import or_
-
-    from app.services.encryption import blind_email, blind_phone
-
-    p_hash = blind_phone(user.phone)
-    e_hash = blind_email(user.email)
-    conditions = [
-        Customer.phone == user.phone,
-        Customer.email == user.email,
-    ]
-    if p_hash:
-        conditions.append(Customer.phone_hash == p_hash)
-    if e_hash:
-        conditions.append(Customer.email_hash == e_hash)
-
-    customer_ids = select(Customer.id).where(or_(*conditions))
     result = await db.execute(
         select(Invoice)
         .options(selectinload(Invoice.items))
         .where(
             Invoice.type == "SALE",
-            (Invoice.customer_id == user.id) | (Invoice.customer_id.in_(customer_ids)),
+            (Invoice.customer_id == user.id) | (Invoice.customer_id.in_(linked_customer_ids(user))),
         )
+        .order_by(Invoice.created_at.desc())
     )
     return list(result.scalars().all())
+
+
+@router.get("/portal/my-bills/{invoice_id}", response_model=CustomerInvoiceRead)
+async def get_customer_bill(invoice_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """Single bill for the linked customer; 404 for anything that is not theirs."""
+    result = await db.execute(
+        select(Invoice)
+        .options(selectinload(Invoice.items))
+        .where(
+            Invoice.id == invoice_id,
+            Invoice.type == "SALE",
+            (Invoice.customer_id == user.id) | (Invoice.customer_id.in_(linked_customer_ids(user))),
+        )
+    )
+    invoice = result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    return invoice
 
 
 @router.get("/invoices/{invoice_id}", response_model=InvoiceRead)

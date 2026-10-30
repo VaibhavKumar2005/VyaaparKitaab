@@ -1,5 +1,4 @@
 import hashlib
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -11,7 +10,6 @@ from app.cores.config import settings
 from app.cores.database import get_db
 from app.cores.rate_limit import check_rate_limit
 from app.models.refresh_token import RefreshToken
-from app.models.transaction import OTPVerification
 from app.models.user import User
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
 from app.services.auth import (
@@ -22,7 +20,7 @@ from app.services.auth import (
     verify_and_rotate_refresh_token,
     verify_password,
 )
-from app.services.otp import generate_otp, send_otp_sms, store_otp, verify_otp
+from app.services.otp import check_otp_code, dispatch_otp
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -91,13 +89,35 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/otp/send")
-async def send_otp(phone: str, purpose: str = "TRANSACTION", db: AsyncSession = Depends(get_db)):
-    clean_phone = phone.strip().replace(" ", "").replace("+91", "")
+async def send_otp(
+    phone: str,
+    purpose: str = "TRANSACTION",
+    email: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    raw_identifier = phone.strip()
+    clean_phone = raw_identifier if "@" in raw_identifier else raw_identifier.replace(" ", "").replace("+91", "")
     check_rate_limit(f"otp_send:{clean_phone}", max_requests=5, window_seconds=60)
-    otp = generate_otp()
-    await store_otp(db, clean_phone, purpose, otp)
-    send_otp_sms(clean_phone, otp)
-    return {"message": "OTP sent"}
+    try:
+        return await dispatch_otp(db, clean_phone, purpose, email=email)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to send OTP via SMTP/Gateway: {exc}",
+        ) from exc
+
+
+@router.get("/otp/status")
+async def get_otp_status():
+    return {
+        "provider": settings.OTP_PROVIDER,
+        "smtp_configured": bool(settings.SMTP_USER and settings.SMTP_PASSWORD),
+    }
 
 
 
@@ -150,30 +170,25 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.post("/otp/verify")
 async def verify_otp_endpoint(phone: str, otp: str, purpose: str = "TRANSACTION", db: AsyncSession = Depends(get_db)):
-    clean_phone = phone.strip().replace(" ", "").replace("+91", "")
+    raw_identifier = phone.strip()
+    clean_phone = raw_identifier.lower() if "@" in raw_identifier else raw_identifier.replace(" ", "").replace("+91", "")
     check_rate_limit(f"otp_verify:{clean_phone}", max_requests=10, window_seconds=60)
-    # Find the most recent unused OTP for this phone+purpose that hasn't expired
-    now = datetime.now(UTC)
-    result = await db.execute(
-        select(OTPVerification)
-        .where(
-            OTPVerification.phone.in_([clean_phone, phone.strip()]),
-            OTPVerification.purpose == purpose,
-            OTPVerification.used == False,
-            OTPVerification.expires_at > now,
-        )
-        .order_by(OTPVerification.created_at.desc())
-    )
-    verification = result.scalars().first()
-    if not verification:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP")
-
-    if verify_otp(otp, verification.otp_hash):
-        verification.used = True
-        await db.commit()
+    is_valid = await check_otp_code(db, clean_phone, otp, purpose)
+    if is_valid:
+        if "@" in clean_phone:
+            user_res = await db.execute(select(User).where(User.email == clean_phone))
+            u = user_res.scalar_one_or_none()
+            if u:
+                u.email_verified = True
+                await db.commit()
+        else:
+            user_res = await db.execute(select(User).where(User.phone == clean_phone))
+            u = user_res.scalar_one_or_none()
+            if u:
+                u.phone_verified = True
+                await db.commit()
         return {"verified": True, "message": "OTP verified"}
-
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OTP")
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP")
 
 
 class CustomerOtpLoginRequest(BaseModel):
@@ -189,45 +204,57 @@ class BusinessKycRequest(BaseModel):
 
 @router.post("/customer/otp-login", response_model=TokenResponse)
 async def customer_otp_login(payload: CustomerOtpLoginRequest, db: AsyncSession = Depends(get_db)):
-    """Universal Indian consumer frictionless login: Mobile number + OTP."""
+    """Universal Indian consumer frictionless login: Verified Mobile number or Email + OTP."""
     import uuid
 
-    clean_phone = payload.phone.strip().replace(" ", "").replace("+91", "")
-    if not clean_phone.isdigit() or len(clean_phone) < 10:
-        raise HTTPException(status_code=400, detail="Invalid phone number format")
+    raw_identifier = payload.phone.strip()
+    is_email_login = "@" in raw_identifier
+    if is_email_login:
+        clean_identifier = raw_identifier.lower()
+    else:
+        clean_identifier = raw_identifier.replace(" ", "").replace("+91", "")
+        if not clean_identifier.isdigit() or len(clean_identifier) < 10:
+            raise HTTPException(status_code=400, detail="Invalid phone number format")
 
-    is_sandbox_otp_allowed = settings.ENV.lower() in ("development", "testing") and payload.otp == "123456"
-    if not is_sandbox_otp_allowed:
-        now = datetime.now(UTC)
-        result = await db.execute(
-            select(OTPVerification)
-            .where(
-                OTPVerification.phone == clean_phone,
-                OTPVerification.purpose == "LOGIN",
-                OTPVerification.used == False,
-                OTPVerification.expires_at > now,
+    is_valid = await check_otp_code(db, clean_identifier, payload.otp, purpose="LOGIN")
+    if not is_valid:
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+
+    if is_email_login:
+        res = await db.execute(select(User).where(User.email == clean_identifier))
+        user = res.scalar_one_or_none()
+        if not user:
+            user = User(
+                id=uuid.uuid4(),
+                email=clean_identifier,
+                hashed_password=hash_password(uuid.uuid4().hex),
+                full_name=f"Customer ({clean_identifier.split('@')[0]})",
+                role="CUSTOMER",
+                is_active=True,
+                email_verified=True,
             )
-            .order_by(OTPVerification.created_at.desc())
-        )
-        verification = result.scalars().first()
-        if not verification or not verify_otp(payload.otp, verification.otp_hash):
-            raise HTTPException(status_code=400, detail="Invalid or expired OTP")
-        verification.used = True
-
-    # Find or auto-register customer account for this phone
-    res = await db.execute(select(User).where(User.phone == clean_phone))
-    user = res.scalar_one_or_none()
-    if not user:
-        user = User(
-            id=uuid.uuid4(),
-            email=f"{clean_phone}@customer.vyaapar.local",
-            hashed_password=hash_password(uuid.uuid4().hex),
-            full_name=f"Customer ({clean_phone[-4:]})",
-            phone=clean_phone,
-            role="CUSTOMER",
-            is_active=True,
-        )
-        db.add(user)
+            db.add(user)
+        else:
+            user.email_verified = True
+        await db.commit()
+        await db.refresh(user)
+    else:
+        res = await db.execute(select(User).where(User.phone == clean_identifier))
+        user = res.scalar_one_or_none()
+        if not user:
+            user = User(
+                id=uuid.uuid4(),
+                email=f"{clean_identifier}@customer.vyaapar.local",
+                hashed_password=hash_password(uuid.uuid4().hex),
+                full_name=f"Customer ({clean_identifier[-4:]})",
+                phone=clean_identifier,
+                role="CUSTOMER",
+                is_active=True,
+                phone_verified=True,
+            )
+            db.add(user)
+        else:
+            user.phone_verified = True
         await db.commit()
         await db.refresh(user)
 

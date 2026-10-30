@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { AlertTriangle, Sparkles, TrendingUp, Wallet } from 'lucide-react';
 import { BankingIncomeExplorer } from '../components/BankingIncomeExplorer';
+import { PaymentBreakdownChart } from '../components/PaymentBreakdownChart';
 import { ErrorState } from '../components/ui/ErrorState';
 import { LoadingState } from '../components/ui/LoadingState';
 import { StatusPill, paymentState } from '../components/StatusPill';
@@ -96,6 +97,9 @@ export function StoreDashboard() {
           emphasis={dash.data.lowStockItems > 0}
         />
       </section>
+
+      {/* Real Ingested Gateway & Google Pay / UPI Collections */}
+      <PaymentBreakdownChart />
 
       {/* Connected Banking App: Inflow Income Explorer (RBI AA) */}
       <BankingIncomeExplorer />

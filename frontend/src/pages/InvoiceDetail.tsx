@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { ArrowLeft, Printer, QrCode, CheckCircle2, AlertCircle, CreditCard, Copy, Check, Banknote } from 'lucide-react';
 import { ErrorState } from '../components/ui/ErrorState';
 import { LoadingState } from '../components/ui/LoadingState';
@@ -10,6 +10,7 @@ import { formatDate, formatINRPrecise } from '../lib/format';
 
 export function InvoiceDetail() {
   const { id } = useParams();
+  const inPortal = useLocation().pathname.startsWith('/portal');
   const { data, isPending, isError, refetch } = useInvoice(id);
   const { data: customers } = useCustomers();
   const { data: products } = useProducts();
@@ -95,8 +96,8 @@ export function InvoiceDetail() {
     <div className="space-y-6">
       {/* Top back navigation and actions */}
       <div className="no-print flex flex-wrap items-center justify-between gap-3">
-        <Link to="/app/invoices" className="inline-flex items-center gap-1.5 text-sm font-medium text-navy hover:underline">
-          <ArrowLeft className="h-4 w-4" /> Back to Invoices
+        <Link to={inPortal ? '/portal/bills' : '/app/invoices'} className="inline-flex items-center gap-1.5 text-sm font-medium text-navy hover:underline">
+          <ArrowLeft className="h-4 w-4" /> {inPortal ? 'Back to My Bills' : 'Back to Invoices'}
         </Link>
         <div className="flex items-center gap-2">
           <button

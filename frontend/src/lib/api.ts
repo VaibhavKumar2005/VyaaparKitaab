@@ -1,8 +1,12 @@
 import { getAccessToken, setAccessToken } from './tokenStore';
 
+const API_BASE = import.meta.env.VITE_API_URL
+  ? String(import.meta.env.VITE_API_URL).replace(/\/$/, '')
+  : '';
+
 async function tryRefresh(): Promise<string | null> {
   try {
-    const resp = await fetch('/api/v1/auth/refresh', {
+    const resp = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -27,7 +31,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const response = await fetch(`/api/v1${path}`, {
+  const response = await fetch(`${API_BASE}/api/v1${path}`, {
     ...options,
     headers,
     credentials: options.credentials ?? 'same-origin',
@@ -38,7 +42,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     if (newToken) {
       // retry original request once
       const retryHeaders = { ...headers, Authorization: `Bearer ${newToken}` };
-      const retry = await fetch(`/api/v1${path}`, {
+      const retry = await fetch(`${API_BASE}/api/v1${path}`, {
         ...options,
         headers: retryHeaders,
         credentials: options.credentials ?? 'same-origin',

@@ -27,6 +27,29 @@ class Settings(BaseSettings):
     PAYMENT_KEY_SECRET: str = Field(default="")
     PAYMENT_WEBHOOK_SECRET: str = Field(default="")
 
+    # Bank Inflows & Account Aggregator Data Provider ("mock" or "setu_aa")
+    BANK_DATA_PROVIDER: str = Field(default="mock")
+    SETU_AA_BASE_URL: str = Field(default="https://fiu-sandbox.setu.co/v2")
+    SETU_AA_CLIENT_ID: str = Field(default="")
+    SETU_AA_CLIENT_SECRET: str = Field(default="")
+    SETU_AA_PRODUCT_INSTANCE_ID: str = Field(default="")
+    SETU_AA_REDIRECT_URL: str = Field(default="http://localhost:5173/app/dashboard")
+    SETU_AA_WEBHOOK_SECRET: str = Field(default="")
+
+    # OTP & SMS / Email Verification Provider ("smtp_email", "twilio_verify", "twilio_sms", or "sandbox")
+    OTP_PROVIDER: str = Field(default="smtp_email")
+    TWILIO_ACCOUNT_SID: str = Field(default="")
+    TWILIO_AUTH_TOKEN: str = Field(default="")
+    TWILIO_VERIFY_SERVICE_SID: str = Field(default="")
+    TWILIO_FROM_PHONE: str = Field(default="")
+
+    # Gmail / SMTP Email OTP Configuration
+    SMTP_HOST: str = Field(default="smtp.gmail.com")
+    SMTP_PORT: int = Field(default=587)
+    SMTP_USER: str = Field(default="")
+    SMTP_PASSWORD: str = Field(default="")
+    SMTP_FROM_EMAIL: str = Field(default="")
+
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
     def parse_allowed_origins(cls, value):

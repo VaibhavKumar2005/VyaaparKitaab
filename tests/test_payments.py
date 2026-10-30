@@ -8,7 +8,8 @@ import pytest
 os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/vyaapardb")
 os.environ.setdefault("ENV", "testing")
 
-from app.cores.database import get_db
+import httpx
+from app.cores.database import engine, get_db
 from app.main import app
 from app.models.transaction import Invoice
 from app.models.user import User
@@ -75,35 +76,38 @@ def test_payment_info_endpoint() -> None:
         app.dependency_overrides.pop(get_current_user, None)
 
 
-def test_payment_webhook_endpoint() -> None:
-    client = TestClient(app)
-    webhook_payload = {
-        "event": "payment.captured",
-        "payload": {
-            "payment": {
-                "entity": {
-                    "id": "pay_test_webhook_01",
-                    "amount": 25000,
-                    "currency": "INR",
-                    "status": "captured",
-                    "method": "upi",
-                    "notes": {"invoice_id": str(uuid4())},
+@pytest.mark.anyio
+async def test_payment_webhook_endpoint() -> None:
+    await engine.dispose()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        webhook_payload = {
+            "event": "payment.captured",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": f"pay_test_{uuid4().hex[:8]}",
+                        "amount": 25000,
+                        "currency": "INR",
+                        "status": "captured",
+                        "method": "upi",
+                        "notes": {"invoice_id": str(uuid4())},
+                    }
                 }
-            }
-        },
-    }
-    # 1. Unsigned webhook must be rejected with 400
-    unsigned_res = client.post("/api/v1/payments/webhook", json=webhook_payload)
-    assert unsigned_res.status_code == 400
+            },
+        }
+        # 1. Unsigned webhook must be rejected with 400
+        unsigned_res = await client.post("/api/v1/payments/webhook", json=webhook_payload)
+        assert unsigned_res.status_code == 400
 
-    # 2. Signed webhook is accepted
-    signed_res = client.post(
-        "/api/v1/payments/webhook",
-        json=webhook_payload,
-        headers={"X-Razorpay-Signature": "sandbox_webhook_sig"},
-    )
-    assert signed_res.status_code == 200
-    assert signed_res.json()["status"] == "success"
+        # 2. Signed webhook is accepted
+        signed_res = await client.post(
+            "/api/v1/payments/webhook",
+            json=webhook_payload,
+            headers={"X-Razorpay-Signature": "sandbox_webhook_sig"},
+        )
+        assert signed_res.status_code == 200
+        assert signed_res.json()["status"] == "success"
 
 
 class _FakeInvoiceResult:
@@ -117,6 +121,9 @@ class _FakeInvoiceResult:
 class _FakePaymentDB:
     def __init__(self, inv: Invoice | None) -> None:
         self.inv = inv
+
+    def add(self, _obj: Any) -> None:
+        pass
 
     async def execute(self, _stmt: Any) -> _FakeInvoiceResult:
         return _FakeInvoiceResult(self.inv)

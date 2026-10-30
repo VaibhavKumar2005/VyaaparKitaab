@@ -49,6 +49,22 @@ export function useInvoices() {
   });
 }
 
+/** Customer-side (B2C) bills: only invoices linked to the signed-in customer's phone/e-mail. */
+export function useMyBills() {
+  return useQuery({
+    queryKey: ['invoices', 'my-bills'],
+    queryFn: async () => {
+      if (isDemoMode()) {
+        return getMockInvoices().filter(
+          (i) => i.type === 'SALE' && (i.customer_id === 'cust-001' || i.customer_id === 'cust-003' || !i.customer_id),
+        );
+      }
+      const bills = await apiFetch<Array<Omit<Invoice, 'customer_id'>>>('/portal/my-bills');
+      return bills as Invoice[];
+    },
+  });
+}
+
 export function useInvoice(id: string | undefined) {
   return useQuery({
     queryKey: ['invoices', id],
@@ -61,9 +77,12 @@ export function useInvoice(id: string | undefined) {
       try {
         return await apiFetch<Invoice>(`/invoices/${id}`);
       } catch {
-        const inv = getMockInvoice(id);
-        if (inv) return inv;
-        throw new Error('Invoice not found');
+        try {
+          // Not a store-owned invoice: try the customer's own bills.
+          return (await apiFetch<Invoice>(`/portal/my-bills/${id}`)) as Invoice;
+        } catch {
+          throw new Error('Invoice not found');
+        }
       }
     },
     enabled: Boolean(id),

@@ -1,25 +1,30 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Receipt, Users, Package, LogOut, Plus, RotateCcw, ShoppingBag } from 'lucide-react';
+import {
+  LayoutDashboard,
+  Receipt,
+  Users,
+  Package,
+  LogOut,
+  Plus,
+  RotateCcw,
+  ShoppingBag,
+  Database,
+  SlidersHorizontal,
+} from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { resetMockData } from '../mock/mockStore';
 import { useQueryClient } from '@tanstack/react-query';
 
-const links = [
-  { to: '/app/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/app/invoices', label: 'Invoices', icon: Receipt },
-  { to: '/app/customers', label: 'Customers', icon: Users },
-  { to: '/app/products', label: 'Inventory', icon: Package },
-  { to: '/portal/spending', label: 'Personal Spending', icon: ShoppingBag },
+const tabs = [
+  { to: '/app/dashboard', label: 'Financial Dashboard', icon: LayoutDashboard },
+  { to: '/app/invoices', label: 'Invoices & Billing', icon: Receipt },
+  { to: '/app/customers', label: 'Customers & Udhaar', icon: Users },
+  { to: '/app/products', label: 'Inventory Stock', icon: Package },
+  { to: '/portal/bills', label: 'Customer Passbook', icon: ShoppingBag },
 ];
 
-const linkClass = ({ isActive }: { isActive: boolean }) =>
-  [
-    'flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
-    isActive ? 'bg-navy-tint text-navy' : 'text-ink-soft hover:bg-canvas-sunk hover:text-ink',
-  ].join(' ');
-
 export function AppShell() {
-  const { user, logout, isDemo } = useAuth();
+  const { user, logout, isDemo, enableDemo, disableDemo } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -28,104 +33,148 @@ export function AppShell() {
     queryClient.invalidateQueries();
   };
 
+  const handleToggleMode = () => {
+    if (isDemo) {
+      disableDemo();
+    } else {
+      enableDemo();
+    }
+    queryClient.invalidateQueries();
+  };
+
   return (
-    <div className="min-h-screen bg-canvas text-ink md:flex">
-      <aside className="no-print hidden w-64 shrink-0 flex-col border-r border-rule bg-canvas-raised md:flex">
-        <div className="px-5 py-5">
-          <span className="font-display text-xl font-bold text-navy">VyaparKitaab</span>
-          <p className="mt-0.5 text-xs text-ink-faint">Digital Bahi-Khata for MSMEs</p>
+    <div className="min-h-screen bg-canvas text-ink flex flex-col font-sans">
+      {/* ─── Storey 1: SAP 60px Global Chrome Bar ─── */}
+      <header className="no-print h-[60px] bg-chrome border-b border-rule px-4 sm:px-6 flex items-center justify-between shrink-0">
+        {/* Brand identity */}
+        <div className="flex items-center gap-3">
+          <span className="font-display text-lg font-bold text-ink tracking-tight">VyaparKitaab</span>
+          <span className="hidden sm:inline-block h-4 w-px bg-rule" />
+          <span className="hidden sm:inline-block text-xs text-ink-nav">
+            MSME Digital Bahi-Khata & Operating System
+          </span>
         </div>
 
-        {isDemo && (
-          <div className="mx-3 mb-3 rounded-md border border-navy/20 bg-navy-tint p-3 text-xs">
-            <div className="flex items-center justify-between font-semibold text-navy">
-              <span>⚡ Sample Store Data</span>
+        {/* Real-time backend vs Demo switcher */}
+        <div className="flex items-center gap-2">
+          {!isDemo ? (
+            <div className="flex items-center gap-2 rounded-md border border-rule bg-white px-3 py-1.5 text-xs">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-positive opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-positive" />
+              </span>
+              <span className="font-semibold text-ink">🟢 Live PostgreSQL Database</span>
+              <button
+                type="button"
+                onClick={handleToggleMode}
+                title="Switch to offline sample store"
+                className="ml-2 text-[11px] text-primary font-medium hover:underline flex items-center gap-1"
+              >
+                <SlidersHorizontal className="h-3 w-3" /> Sample Demo
+              </button>
             </div>
-            <p className="mt-1 text-[11px] text-ink-soft">
-              Sharma Kirana & General Store (Kanpur Road, Lucknow)
-            </p>
-          </div>
-        )}
-
-        <nav className="flex-1 space-y-1 px-3" aria-label="Main">
-          {links.map(({ to, label, icon: Icon }) => (
-            <NavLink key={to} to={to} className={linkClass}>
-              <Icon className="h-4 w-4" aria-hidden /> {label}
-            </NavLink>
-          ))}
-        </nav>
-
-        <div className="border-t border-rule p-4">
-          <p className="truncate text-xs font-semibold text-ink">{user?.email}</p>
-          <div className="mt-2 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={logout}
-              className="flex items-center gap-1.5 text-xs font-medium text-ink-soft hover:text-ink"
-            >
-              <LogOut className="h-3.5 w-3.5" aria-hidden /> Sign out
-            </button>
-            {isDemo && (
+          ) : (
+            <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-900">
+              <Database className="h-3.5 w-3.5 text-amber-700" />
+              <span>⚡ <strong>Sample Store Data</strong> (Offline Sandbox)</span>
+              <button
+                type="button"
+                onClick={handleToggleMode}
+                title="Connect to live PostgreSQL backend"
+                className="ml-2 font-semibold text-primary hover:underline"
+              >
+                Connect Live DB
+              </button>
               <button
                 type="button"
                 onClick={handleResetData}
-                title="Reset test data to original state"
-                className="flex items-center gap-1 text-[11px] text-navy hover:underline"
+                title="Reset sample data"
+                className="ml-1 text-[11px] text-ink-soft hover:underline flex items-center gap-0.5"
               >
-                <RotateCcw className="h-3 w-3" /> Reset data
+                <RotateCcw className="h-3 w-3" /> Reset
               </button>
-            )}
-          </div>
-        </div>
-      </aside>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="no-print sticky top-0 z-20 border-b border-rule bg-canvas-raised md:hidden">
-          <div className="flex items-center justify-between px-4 py-3">
-            <div>
-              <span className="font-bold text-navy">VyaparKitaab</span>
-              {isDemo && <span className="ml-2 text-[10px] font-semibold text-navy bg-navy-tint px-1.5 py-0.5 rounded">Sample Data</span>}
             </div>
-            <button type="button" onClick={logout} aria-label="Sign out" className="p-2 text-ink-soft">
-              <LogOut className="h-4 w-4" />
-            </button>
+          )}
+        </div>
+
+        {/* User Account & Actions */}
+        <div className="flex items-center gap-3">
+          <div className="hidden md:block text-right text-xs">
+            <p className="font-medium text-ink truncate max-w-[200px]">{user?.email ?? 'Merchant'}</p>
+            <p className="text-[11px] text-ink-soft">
+              {!isDemo ? 'Store Owner (Sharma Kirana)' : 'Demo Sandbox Session'}
+            </p>
           </div>
-          <nav className="flex gap-1 overflow-x-auto px-3 pb-2" aria-label="Main">
-            {links.map(({ to, label }) => (
-              <NavLink key={to} to={to} className={linkClass}>
-                {label}
-              </NavLink>
-            ))}
-          </nav>
-        </header>
+          <button
+            type="button"
+            onClick={logout}
+            className="flex items-center gap-1.5 rounded-md border border-rule bg-white px-2.5 py-1.5 text-xs font-medium text-ink-nav hover:text-ink hover:bg-chrome transition-colors"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Sign out</span>
+          </button>
+        </div>
+      </header>
 
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-8">
-          <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3">
-            {isDemo ? (
-              <div className="flex items-center gap-2 rounded-md border border-rule bg-canvas-raised px-3 py-1.5 text-xs text-ink-soft">
-                <span className="h-2 w-2 rounded-full bg-positive" />
-                <span>Viewing <strong>Sharma Kirana Store</strong> test records</span>
-                <button
-                  type="button"
-                  onClick={handleResetData}
-                  className="ml-2 flex items-center gap-1 font-semibold text-navy hover:underline"
-                >
-                  <RotateCcw className="h-3 w-3" /> Reset
-                </button>
-              </div>
-            ) : <div />}
-
-            <button
-              type="button"
-              onClick={() => navigate('/app/invoices/new')}
-              className="inline-flex items-center gap-1.5 rounded-md bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-dark"
+      {/* ─── Storey 2: SAP Product Tab Rail ─── */}
+      <nav
+        className="no-print bg-white border-b border-rule px-4 sm:px-6 flex items-center justify-between shrink-0 overflow-x-auto"
+        aria-label="Product Navigation"
+      >
+        <div className="flex gap-1 -mb-px">
+          {tabs.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) =>
+                [
+                  'flex items-center gap-2 px-3.5 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
+                  isActive
+                    ? 'border-primary text-primary font-semibold'
+                    : 'border-transparent text-ink-nav hover:text-ink hover:border-rule',
+                ].join(' ')
+              }
             >
-              <Plus className="h-4 w-4" aria-hidden /> New invoice
-            </button>
-          </div>
+              <Icon className="h-4 w-4" aria-hidden />
+              <span>{label}</span>
+            </NavLink>
+          ))}
+        </div>
+
+        <div className="py-2 pl-4 shrink-0">
+          <button
+            type="button"
+            onClick={() => navigate('/app/invoices/new')}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-1.5 text-xs sm:text-sm font-semibold text-white hover:bg-primary-deep shadow-none transition-colors"
+          >
+            <Plus className="h-4 w-4" aria-hidden />
+            <span>New Invoice</span>
+          </button>
+        </div>
+      </nav>
+
+      {/* ─── Storey 3: Content Pane (White Canvas Ground) ─── */}
+      <main className="flex-1 bg-white">
+        <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
           <Outlet />
-        </main>
-      </div>
+        </div>
+      </main>
+
+      {/* ─── Enterprise Quiet Footer ─── */}
+      <footer className="no-print border-t border-rule bg-canvas-sunk py-3 px-6 text-xs text-ink-nav flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-3">
+          <span>© 2026 VyaparKitaab MSME Enterprise</span>
+          <span>•</span>
+          <span>Dual Dashboard Architecture (Store B2B + Retail Customer Bahi-Khata)</span>
+        </div>
+        <div className="flex items-center gap-2 font-mono text-[11px]">
+          <span>FastAPI</span>
+          <span>•</span>
+          <span>PostgreSQL 17</span>
+          <span>•</span>
+          <span>Real-time SSE Stream</span>
+        </div>
+      </footer>
     </div>
   );
 }

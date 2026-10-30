@@ -17,6 +17,7 @@ from app.routers.business import router as business_router
 from app.routers.health import router as health_router
 from app.routers.payments import router as payments_router
 from app.routers.purchases import router as purchases_router
+from app.routers.streams import router as streams_router
 from app.routers.transactions import router as transactions_router
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
@@ -71,6 +72,7 @@ async def add_security_headers(request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origin_regex=r"https?://.*\.vercel\.app.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -96,3 +98,4 @@ app.include_router(payments_router, prefix="/api/v1")
 app.include_router(banking_router, prefix="/api/v1")
 app.include_router(purchases_router, prefix="/api/v1")
 app.include_router(ai_router, prefix="/api/v1")
+app.include_router(streams_router, prefix="/api/v1")

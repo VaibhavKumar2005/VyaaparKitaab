@@ -162,18 +162,26 @@ class PaymentService:
 
     def verify_webhook_signature(self, raw_body: bytes, signature: str | None) -> bool:
         """
-        Verifies the incoming webhook payload using the shared webhook secret.
+        Verifies the incoming webhook payload using the shared webhook secret via HMAC-SHA256.
         """
         if not signature:
             return False
 
-        if not self.webhook_secret:
-            if settings.ENV.lower() not in ("development", "testing"):
-                return False
-            return signature in ("sandbox_valid", "sandbox_webhook_sig", "dummy_signature")
+        if settings.ENV.lower() in ("development", "testing") and signature in (
+            "sandbox_valid",
+            "sandbox_webhook_sig",
+            "dummy_signature",
+        ):
+            return True
 
-        expected = hmac.new(self.webhook_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(expected, signature)
+        secret = self.webhook_secret or settings.PAYMENT_WEBHOOK_SECRET
+        if secret:
+            expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+            return hmac.compare_digest(expected, signature)
+
+        if settings.ENV.lower() not in ("development", "testing"):
+            return False
+        return signature in ("sandbox_valid", "sandbox_webhook_sig", "dummy_signature")
 
 
 payment_service = PaymentService()

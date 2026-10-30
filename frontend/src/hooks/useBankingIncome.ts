@@ -255,7 +255,6 @@ export function useIncomeStream() {
         return mockIncomeStream;
       }
     },
-    refetchInterval: 15000,
   });
 }
 
@@ -272,7 +271,6 @@ export function useIncomeGraph() {
         return mockIncomeGraph;
       }
     },
-    refetchInterval: 15000,
   });
 }
 
@@ -317,6 +315,87 @@ export function useRevokeBankingConsent() {
       });
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['banking_income_stream'] });
+      queryClient.invalidateQueries({ queryKey: ['banking_income_graph'] });
+    },
+  });
+}
+
+export interface PersonalSpendingItem {
+  txn_id: string;
+  timestamp: string;
+  date: string;
+  amount: number;
+  type: 'DEBIT' | 'CREDIT';
+  mode: string;
+  app: string;
+  vpa?: string | null;
+  narration: string;
+  category: string;
+  counterparty: string;
+  masked_acc: string;
+  source: string;
+}
+
+export interface PersonalSpendingResponse {
+  has_imported_data: boolean;
+  total_spent: number;
+  total_received: number;
+  net_cashflow: number;
+  debits_count: number;
+  credits_count: number;
+  category_breakdown: Array<{ category: string; amount: number; count: number; percentage: number }>;
+  app_breakdown: Array<{ app: string; amount: number; count: number; percentage: number }>;
+  monthly_trend: Array<{ month: string; spent: number; received: number; count: number }>;
+  transactions: PersonalSpendingItem[];
+}
+
+export function usePersonalSpending() {
+  return useQuery<PersonalSpendingResponse>({
+    queryKey: ['personal_spending'],
+    queryFn: async () => {
+      return await apiFetch<PersonalSpendingResponse>('/banking/personal-spending');
+    },
+  });
+}
+
+export function useImportStatement() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const content = await file.text();
+      return await apiFetch<{
+        status: string;
+        filename: string;
+        imported_count: number;
+        credits_count: number;
+        debits_count: number;
+      }>('/banking/import-statement', {
+        method: 'POST',
+        body: JSON.stringify({
+          filename: file.name,
+          content,
+        }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['personal_spending'] });
+      queryClient.invalidateQueries({ queryKey: ['banking_income_stream'] });
+      queryClient.invalidateQueries({ queryKey: ['banking_income_graph'] });
+    },
+  });
+}
+
+export function useClearImportedTransactions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      return await apiFetch<{ status: string }>('/banking/transactions', {
+        method: 'DELETE',
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['personal_spending'] });
       queryClient.invalidateQueries({ queryKey: ['banking_income_stream'] });
       queryClient.invalidateQueries({ queryKey: ['banking_income_graph'] });
     },
