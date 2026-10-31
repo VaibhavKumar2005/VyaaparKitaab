@@ -6,9 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-import app.models
 from app.cores.config import settings
-from app.cores.database import Base, engine
+from app.cores.database import SessionLocal
 from app.cores.exceptions import register_exception_handlers
 from app.routers.ai_insights import router as ai_router
 from app.routers.auth import router as auth_router
@@ -25,12 +24,7 @@ FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Automatically ensure all tables exist in PostgreSQL on boot (safe across dev and prod)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     if settings.ENV.lower() == "development":
-        from app.cores.database import SessionLocal
         from app.db.seed import seed_database_if_empty
 
         async with SessionLocal() as session:

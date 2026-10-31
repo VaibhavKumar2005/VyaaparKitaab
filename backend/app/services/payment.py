@@ -36,7 +36,9 @@ class PaymentService:
         notes = notes or {}
         receipt = receipt or f"rcpt_{uuid.uuid4().hex[:8]}"
 
-        if self.gateway == "razorpay" and self.key_id and self.key_secret:
+        if self.gateway == "razorpay":
+            if not self.key_id or not self.key_secret:
+                raise RuntimeError("Razorpay credentials are required when PAYMENT_GATEWAY=razorpay")
             amount_in_paise = round(amount * 100)
             payload = {
                 "amount": amount_in_paise,
@@ -72,7 +74,8 @@ class PaymentService:
                     "raw": data,
                 }
 
-        # Sandbox / Fallback implementation for local development & demonstration
+        # Sandbox implementation for local development & demonstration.
+        # It is never used when production is configured for Razorpay.
         mock_order_id = f"order_mock_{uuid.uuid4().hex[:12]}"
         upi_uri = (
             f"upi://pay?pa=vyapar@bank&pn=VyaparKitaab&am={amount:.2f}&cu={currency}&tr={receipt}&tn=Invoice%20Payment"
@@ -98,7 +101,9 @@ class PaymentService:
         """
         Fetches payment details and status from the gateway using API credentials.
         """
-        if self.gateway == "razorpay" and self.key_id and self.key_secret:
+        if self.gateway == "razorpay":
+            if not self.key_id or not self.key_secret:
+                raise RuntimeError("Razorpay credentials are required when PAYMENT_GATEWAY=razorpay")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.get(
                     f"https://api.razorpay.com/v1/payments/{payment_id}",
@@ -185,4 +190,3 @@ class PaymentService:
 
 
 payment_service = PaymentService()
-

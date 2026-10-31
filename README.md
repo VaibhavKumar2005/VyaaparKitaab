@@ -338,6 +338,9 @@ docker build -t vyaaparkitaab-backend -f docker/Dockerfile .
 docker run --env-file .env.example -p 8000:8000 vyaaparkitaab-backend
 ```
 
+> [!NOTE]
+> When running the backend container standalone, ensure `DATABASE_URL` points to an accessible PostgreSQL instance. If PostgreSQL is running on your host machine, use `--network="host"` on Linux or point `DATABASE_URL` to `host.docker.internal:5432` on macOS/Windows. For zero-config local full-stack setup, use `docker compose up --build` below.
+
 Or run locally with Uvicorn:
 
 ```bash
@@ -405,4 +408,7 @@ Start the stack:
 docker-compose up --build
 ```
 
-Open `http://localhost:8000` to see the simple frontend and `http://localhost:8000/health` for the API health.
+The frontend is available at `http://localhost:5173`. The API health endpoint is
+`http://localhost:8000/api/v1/health`. The backend runs `alembic upgrade head`
+before starting, so the database schema is created from migrations rather than
+from application startup.

@@ -45,11 +45,11 @@ def verify_gstin(gstin: str) -> dict[str, Any]:
         "pan": pan,
         "state_code": state_code,
         "state_name": state_name,
-        "legal_name": "SHARMA ENTERPRISES PVT LTD",
-        "trade_name": "Sharma Kirana & General Store",
-        "taxpayer_type": "Regular MSME",
-        "status": "Active (सक्रिय)",
-        "verified_at": "2026-10-16T10:00:00Z",
+        "legal_name": f"Taxpayer ({pan})",
+        "trade_name": None,
+        "taxpayer_type": "Regular MSME (Format Validated)",
+        "status": "FORMAT_VALID",
+        "verified_at": "2026-10-31T00:00:00Z",
     }
 
 
@@ -109,7 +109,7 @@ def verify_bank_account(account_number: str, ifsc: str) -> dict[str, Any]:
         "account_masked": f"•••• •••• {clean_acc[-4:]}",
         "ifsc": clean_ifsc,
         "bank_name": bank_names.get(bank_code, f"{bank_code} Bank"),
-        "penny_drop_status": "SUCCESS",
-        "beneficiary_name": "SHARMA ENTERPRISES",
+        "penny_drop_status": "NOT_CHECKED",
+        "beneficiary_name": None,
     }
 

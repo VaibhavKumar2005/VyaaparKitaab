@@ -12,12 +12,14 @@ const inputClass =
 
 type KycVerificationResult = {
   status: string;
+  provider?: string;
+  checks?: Record<string, boolean | string>;
   gst_details: {
     gstin: string;
     pan: string;
     state_code: string;
     state_name: string;
-    legal_name: string;
+    legal_name?: string | null;
     taxpayer_type: string;
     status: string;
   };
@@ -32,35 +34,17 @@ type KycVerificationResult = {
 };
 
 export function RegisterPage() {
-  const { register: registerAccount } = useAuth();
+  const { register: registerAccount, token } = useAuth();
   const navigate = useNavigate();
 
   const [role, setRole] = useState<'STORE_OWNER' | 'CUSTOMER'>('STORE_OWNER');
-  const [businessName, setBusinessName] = useState('Sharma Kirana & General Store');
-  const [businessAddress, setBusinessAddress] = useState('Plot 42, Civil Lines, Mathura, UP - 281001');
-  const [gstin, setGstin] = useState('09AAACS1429B1Z8');
-  const [bankAccount, setBankAccount] = useState('50100234987612');
-  const [ifsc, setIfsc] = useState('HDFC0001234');
+  const [businessName, setBusinessName] = useState('');
+  const [businessAddress, setBusinessAddress] = useState('');
+  const [gstin, setGstin] = useState('');
+  const [bankAccount, setBankAccount] = useState('');
+  const [ifsc, setIfsc] = useState('');
   const [kycVerifying, setKycVerifying] = useState(false);
-  const [kycResult, setKycResult] = useState<KycVerificationResult | null>({
-    status: 'VERIFIED',
-    gst_details: {
-      gstin: '09AAACS1429B1Z8',
-      pan: 'AAACS1429B',
-      state_code: '09',
-      state_name: 'Uttar Pradesh',
-      legal_name: 'SHARMA ENTERPRISES PVT LTD',
-      taxpayer_type: 'Regular MSME',
-      status: 'Active (GSTN Verified)',
-    },
-    bank_settlement: {
-      bank_name: 'HDFC Bank Ltd',
-      ifsc: 'HDFC0001234',
-      masked_account: 'XXXX-XXXX-7612',
-      penny_drop_status: 'VERIFIED (₹1 IMPS Settlement Active)',
-    },
-    message: 'Business KYC successfully verified.',
-  });
+  const [kycResult, setKycResult] = useState<KycVerificationResult | null>(null);
   const [kycError, setKycError] = useState<string | null>(null);
 
   const {
@@ -77,6 +61,9 @@ export function RegisterPage() {
     setKycError(null);
     setKycVerifying(true);
     try {
+      if (!token) {
+        throw new Error('Create and sign in to a merchant account before submitting KYC details.');
+      }
       const res = await apiFetch<KycVerificationResult>('/auth/business/verify-kyc', {
         method: 'POST',
         body: JSON.stringify({
@@ -87,48 +74,8 @@ export function RegisterPage() {
       });
       setKycResult(res);
     } catch (err) {
-      // Client-side regex fallback if backend is not reachable
-      const cleanGstin = gstin.trim().toUpperCase();
-      const cleanIfsc = ifsc.trim().toUpperCase();
-      const cleanAcc = bankAccount.trim();
-      const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-      const ifscRegex = /^[A-Z]{4}0[A-Z0-9]{6}$/;
-
-      if (!gstRegex.test(cleanGstin)) {
-        setKycResult(null);
-        setKycError(
-          err instanceof Error
-            ? err.message
-            : 'Invalid GSTIN format. Must be 15 characters (e.g. 09AAACS1429B1Z8).',
-        );
-      } else if (!ifscRegex.test(cleanIfsc) || cleanAcc.length < 9) {
-        setKycResult(null);
-        setKycError('Invalid Bank Account (9–18 digits) or IFSC code (e.g. HDFC0001234).');
-      } else {
-        setKycResult({
-          status: 'VERIFIED',
-          gst_details: {
-            gstin: cleanGstin,
-            pan: cleanGstin.slice(2, 12),
-            state_code: cleanGstin.slice(0, 2),
-            state_name: cleanGstin.startsWith('09') ? 'Uttar Pradesh' : 'Indian State',
-            legal_name: businessName.toUpperCase() || 'VERIFIED MSME ENTERPRISE',
-            taxpayer_type: 'Regular MSME',
-            status: 'Active (GSTN Verified)',
-          },
-          bank_settlement: {
-            bank_name: cleanIfsc.startsWith('HDFC')
-              ? 'HDFC Bank Ltd'
-              : cleanIfsc.startsWith('SBIN')
-                ? 'State Bank of India'
-                : 'Scheduled Commercial Bank',
-            ifsc: cleanIfsc,
-            masked_account: `XXXX-XXXX-${cleanAcc.slice(-4)}`,
-            penny_drop_status: 'VERIFIED (₹1 IMPS Settlement Active)',
-          },
-          message: 'Business KYC successfully verified.',
-        });
-      }
+      setKycResult(null);
+      setKycError(err instanceof Error ? err.message : 'Unable to submit KYC details.');
     } finally {
       setKycVerifying(false);
     }
@@ -359,13 +306,13 @@ export function RegisterPage() {
                 <div className="flex items-center justify-between font-bold text-positive">
                   <span className="flex items-center gap-1.5">
                     <CheckCircle2 className="h-4 w-4" />
-                    KYC Verified: {kycResult.gst_details.legal_name}
+                    KYC checks completed: {kycResult.status}
                   </span>
                   <span className="font-mono text-[10px]">{kycResult.gst_details.status}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-1 text-[11px] text-ink-soft pt-1">
                   <div>
-                    <span className="font-semibold text-ink">Extracted PAN:</span>{' '}
+                    <span className="font-semibold text-ink">PAN extracted from GSTIN:</span>{' '}
                     <span className="font-mono">{kycResult.gst_details.pan}</span>
                   </div>
                   <div>
@@ -375,7 +322,7 @@ export function RegisterPage() {
                     </span>
                   </div>
                   <div>
-                    <span className="font-semibold text-ink">Settlement Bank:</span>{' '}
+                    <span className="font-semibold text-ink">Bank (from IFSC):</span>{' '}
                     <span>{kycResult.bank_settlement.bank_name}</span>
                   </div>
                   <div>

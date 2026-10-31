@@ -98,7 +98,10 @@ def _otp_db_key(identifier: str) -> str:
 
 
 def _otp_db_purpose(purpose: str) -> str:
-    return "LOGIN" if purpose.upper() == "LOGIN" else "TRANSACTION"
+    normalized = purpose.upper()
+    if normalized in {"LOGIN", "TRANSACTION", "AA_CONSENT"}:
+        return normalized
+    raise ValueError(f"Unsupported OTP purpose: {purpose}")
 
 
 async def store_otp(db: AsyncSession, phone: str, purpose: str, otp: str) -> OTPVerification:

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.cores.config import settings
 from app.cores.database import get_db
 from app.cores.rate_limit import check_rate_limit
+from app.models.business import Business
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
@@ -16,6 +17,7 @@ from app.services.auth import (
     create_access_token,
     generate_refresh_token,
     hash_password,
+    require_store_owner,
     store_refresh_token,
     verify_and_rotate_refresh_token,
     verify_password,
@@ -280,9 +282,19 @@ async def customer_otp_login(payload: CustomerOtpLoginRequest, db: AsyncSession 
 async def verify_business_kyc(
     payload: BusinessKycRequest,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_store_owner),
 ):
-    """Verify GSTIN and Settlement Bank Account for Merchant Store Owner."""
+    """Verify GSTIN and Settlement Bank Account formats for Merchant Store Owner."""
     from app.services.kyc import verify_bank_account, verify_gstin
+
+    business_result = await db.execute(
+        select(Business).where(Business.owner_id == user.id).limit(1)
+    )
+    if business_result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Create a business profile before submitting KYC details",
+        )
 
     gst_result = verify_gstin(payload.gstin)
     if not gst_result.get("valid"):
@@ -293,8 +305,16 @@ async def verify_business_kyc(
         raise HTTPException(status_code=400, detail=bank_result.get("error"))
 
     return {
-        "status": "VERIFIED",
+        "status": "FORMAT_ONLY",
+        "provider": "local_format_validation",
+        "owner_id": str(user.id),
+        "checks": {
+            "gstin_format": True,
+            "gstin_live_portal": False,
+            "ifsc_format": True,
+            "penny_drop": "NOT_CHECKED",
+        },
         "gst_details": gst_result,
         "bank_settlement": bank_result,
-        "message": "Business KYC successfully verified.",
+        "message": "Format validated locally. Live GST registry lookup & Penny-Drop IMPS settlement require third-party verification provider.",
     }

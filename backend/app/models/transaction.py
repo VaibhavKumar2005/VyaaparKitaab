@@ -53,7 +53,10 @@ class OTPVerification(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     otp_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    purpose: Mapped[str] = mapped_column(Enum("TRANSACTION", "LOGIN", name="otp_purpose"), nullable=False)
+    purpose: Mapped[str] = mapped_column(
+        Enum("TRANSACTION", "LOGIN", "AA_CONSENT", name="otp_purpose"),
+        nullable=False,
+    )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
