@@ -89,3 +89,18 @@ echo " 7. GPAY / UPI PAYMENT SUMMARY (GET /api/v1/payments/summary?period=30d)"
 echo "=================================================================="
 curl -sS "$BASE_URL/api/v1/payments/summary?period=30d" \
   -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+
+echo ""
+echo "=================================================================="
+echo " 8. LIVE ACCOUNT AGGREGATOR DEMO STREAM (EMIT & STATUS)"
+echo "    (POST /api/v1/banking/demo-stream/emit)"
+echo "=================================================================="
+echo "Emitting 1 real-time verified UPI credit event into PostgreSQL & SSE:"
+curl -sS -X POST "$BASE_URL/api/v1/banking/demo-stream/emit" \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+
+echo ""
+echo "Stream Producer Status (GET /api/v1/banking/demo-stream/status):"
+curl -sS "$BASE_URL/api/v1/banking/demo-stream/status" \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+

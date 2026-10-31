@@ -31,6 +31,7 @@ import {
 } from '../hooks/useBankingIncome';
 import { usePaymentStream } from '../hooks/usePaymentStream';
 import { formatINR, formatINRPrecise } from '../lib/format';
+import { LiveBankFeed } from './LiveBankFeed';
 
 const SUPPORTED_BANKS = [
   { id: 'sbi_yono', name: 'SBI YONO', fullName: 'State Bank of India (YONO)', color: 'bg-blue-600' },
@@ -477,6 +478,9 @@ export function BankingIncomeExplorer() {
           </div>
         </div>
       </div>
+
+      {/* Real-time Account Aggregator Live Bank Feed Panel */}
+      <LiveBankFeed />
 
       {/* Dual Chart: Monthly Inward Trend + Recent Credits Ledger */}
       <div className="grid gap-5 lg:grid-cols-2">

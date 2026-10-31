@@ -148,22 +148,22 @@ export function usePaymentStream({
 
                 // 2. Stream-driven cache update for banking income stream
                 const amount = Number(parsedData?.amount || 0);
-                if (amount > 0 || eventType === 'payment.captured' || eventType === 'order.paid') {
+                if (amount > 0 || eventType === 'bank.credit.received' || eventType === 'payment.captured' || eventType === 'order.paid') {
                   queryClient.setQueryData<IncomeStreamResponse>(
                     ['banking_income_stream'],
                     (oldData) => {
                       if (!oldData) return oldData;
                       const newTxn: IncomeTransactionItem = {
-                        txn_id: String(parsedData?.payment_id || parsedData?.event_id || `CR_LIVE_${Date.now()}`),
+                        txn_id: String(parsedData?.txn_id || parsedData?.payment_id || parsedData?.event_id || `CR_LIVE_${Date.now()}`),
                         timestamp: String(parsedData?.timestamp || new Date().toISOString()),
                         date: String((parsedData?.timestamp || new Date().toISOString()).split('T')[0]),
                         amount,
-                        mode: 'UPI',
+                        mode: String(parsedData?.mode || 'UPI'),
                         type: 'CREDIT',
-                        narration: `Live Real-time Payment Settlement #${String(parsedData?.payment_id || parsedData?.order_id || '').slice(-6)}`,
-                        category: 'Business Sales Settlement',
-                        payer_identifier: 'Live Gateway Inflow',
-                        masked_acc: oldData.active_consent?.masked_acc || 'XXXX-XXXX-4821',
+                        narration: String(parsedData?.narration || `Live Payment Settlement #${String(parsedData?.payment_id || parsedData?.txn_id || '').slice(-6)}`),
+                        category: String(parsedData?.category || 'Business Sales Settlement'),
+                        payer_identifier: String(parsedData?.counterparty || parsedData?.app || 'Live Gateway Inflow'),
+                        masked_acc: String(parsedData?.masked_acc || oldData.active_consent?.masked_acc || 'XXXX-XXXX-4821'),
                       };
 
                       const currentMonth = new Date().toISOString().slice(0, 7);
@@ -193,7 +193,9 @@ export function usePaymentStream({
                     }
                   );
 
-                  // Also invalidate invoice lists or store dashboards
+                  // Invalidate related caches so charts and lists update instantly
+                  queryClient.invalidateQueries({ queryKey: ['personal_spending'] });
+                  queryClient.invalidateQueries({ queryKey: ['banking_income_graph'] });
                   queryClient.invalidateQueries({ queryKey: ['invoices'] });
                   queryClient.invalidateQueries({ queryKey: ['store_dashboard'] });
                   queryClient.invalidateQueries({ queryKey: ['personal_purchases'] });

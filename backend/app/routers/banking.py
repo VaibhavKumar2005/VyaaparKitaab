@@ -1,6 +1,6 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,7 @@ from app.schemas.banking import (
 )
 from app.services.account_aggregator import aa_service
 from app.services.auth import get_current_user
+from app.services.bank_stream_simulator import emit_simulated_credit, simulator_manager
 from app.services.statement_importer import (
     clear_imported_transactions,
     get_personal_spending_analytics,
@@ -178,3 +179,48 @@ async def delete_imported_bank_transactions(
     Clears imported bank/UPI statement transactions for the current user.
     """
     return await clear_imported_transactions(db=db, user_id=user.id)
+
+
+@router.post("/demo-stream/start")
+async def start_bank_demo_stream(
+    interval_seconds: int = Query(default=10, ge=3, le=120),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """
+    Starts an automated bank transaction producer for the authenticated user.
+    Periodically persists realistic UPI credit transactions into PostgreSQL and streams via SSE.
+    """
+    return simulator_manager.start(user_id=user.id, interval_seconds=interval_seconds)
+
+
+@router.post("/demo-stream/stop")
+async def stop_bank_demo_stream(
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """
+    Stops the automated bank transaction producer for the authenticated user.
+    """
+    return simulator_manager.stop(user_id=user.id)
+
+
+@router.get("/demo-stream/status")
+async def get_bank_demo_stream_status(
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """
+    Returns the live running state, emit interval, and counts of the demo stream producer.
+    """
+    return simulator_manager.get_status(user_id=user.id)
+
+
+@router.post("/demo-stream/emit", status_code=status.HTTP_201_CREATED)
+async def emit_single_bank_credit(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """
+    Immediately generates, persists, and publishes a single realistic UPI credit transaction.
+    Ideal for presentation triggers ("Emit One Test Credit") without waiting for the timer.
+    """
+    return await emit_simulated_credit(db=db, user_id=user.id)
+

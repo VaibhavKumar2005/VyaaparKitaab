@@ -2,17 +2,19 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from app.cores.database import engine
+from app.cores.database import SessionLocal, engine
 from app.main import app
 from app.models.user import User
 from app.services.auth import get_current_user
+from app.services.bank_stream_simulator import simulator_manager
 
 
 @pytest.fixture
 def test_user():
     return User(
         id=uuid4(),
-        email="test_msme@vyapaarkitaab.in",
+        email=f"test_msme_{uuid4().hex[:6]}@vyapaarkitaab.in",
+        hashed_password="test_hashed_password_123",
         role="STORE_OWNER",
     )
 
@@ -97,3 +99,64 @@ async def test_banking_app_consent_and_safe_income_stream(test_user):
 
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.anyio
+async def test_bank_demo_stream_lifecycle(test_user):
+    """
+    Verifies the real-time Bank Sandbox Stream Simulator:
+    1. Instant credit emit (POST /demo-stream/emit) generates, persists, and publishes SSE event.
+    2. Start/Status/Stop lifecycle for automated producer.
+    3. Emitted transaction immediately appears in personal spending analytics without page refresh.
+    """
+    await engine.dispose()
+    async with SessionLocal() as session:
+        session.add(test_user)
+        await session.commit()
+
+    app.dependency_overrides[get_current_user] = lambda: test_user
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            # 1. Emit instant credit
+            emit_res = await client.post("/api/v1/banking/demo-stream/emit")
+            assert emit_res.status_code == 201
+            data = emit_res.json()
+            assert data["event"] == "bank.credit.received"
+            assert data["txn_id"].startswith("aa_demo_")
+            assert data["type"] == "CREDIT"
+            assert data["amount"] > 0
+            assert data["source"] == "aa_sandbox"
+            assert data["masked_acc"] == "XXXX-XXXX-4821"
+
+            # 2. Check initial status
+            status_res = await client.get("/api/v1/banking/demo-stream/status")
+            assert status_res.status_code == 200
+            status_data = status_res.json()
+            assert "is_running" in status_data
+            assert "interval_seconds" in status_data
+
+            # 3. Start automated producer
+            start_res = await client.post("/api/v1/banking/demo-stream/start?interval_seconds=5")
+            assert start_res.status_code == 200
+            assert start_res.json()["is_running"] is True
+            assert start_res.json()["interval_seconds"] == 5
+
+            # 4. Stop automated producer
+            stop_res = await client.post("/api/v1/banking/demo-stream/stop")
+            assert stop_res.status_code == 200
+            assert stop_res.json()["is_running"] is False
+
+            # 5. Verify the emitted credit is reflected in personal spending analytics
+            spending_res = await client.get("/api/v1/banking/personal-spending")
+            assert spending_res.status_code == 200
+            spending = spending_res.json()
+            assert spending["credits_count"] >= 1
+            assert spending["total_received"] >= data["amount"]
+            assert any(t["txn_id"] == data["txn_id"] for t in spending["transactions"])
+    finally:
+        simulator_manager.stop(test_user.id)
+        app.dependency_overrides.pop(get_current_user, None)
+        await engine.dispose()
+

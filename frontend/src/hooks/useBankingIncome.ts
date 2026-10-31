@@ -402,3 +402,69 @@ export function useClearImportedTransactions() {
   });
 }
 
+export interface BankDemoStreamStatus {
+  is_running: boolean;
+  interval_seconds: number;
+  emitted_count: number;
+  last_emitted_at: string | null;
+}
+
+export function useBankDemoStreamStatus() {
+  return useQuery<BankDemoStreamStatus>({
+    queryKey: ['bank_demo_stream_status'],
+    queryFn: async () => {
+      try {
+        return await apiFetch<BankDemoStreamStatus>('/banking/demo-stream/status');
+      } catch {
+        return { is_running: false, interval_seconds: 10, emitted_count: 0, last_emitted_at: null };
+      }
+    },
+    refetchInterval: (query) => (query.state.data?.is_running ? 3000 : false),
+  });
+}
+
+export function useStartBankDemoStream() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (intervalSeconds: number = 10) => {
+      return await apiFetch<BankDemoStreamStatus>(`/banking/demo-stream/start?interval_seconds=${intervalSeconds}`, {
+        method: 'POST',
+      });
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['bank_demo_stream_status'], data);
+    },
+  });
+}
+
+export function useStopBankDemoStream() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      return await apiFetch<BankDemoStreamStatus>('/banking/demo-stream/stop', {
+        method: 'POST',
+      });
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['bank_demo_stream_status'], data);
+    },
+  });
+}
+
+export function useEmitBankCredit() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      return await apiFetch<Record<string, unknown>>('/banking/demo-stream/emit', {
+        method: 'POST',
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['bank_demo_stream_status'] });
+      queryClient.invalidateQueries({ queryKey: ['banking_income_stream'] });
+      queryClient.invalidateQueries({ queryKey: ['personal_spending'] });
+    },
+  });
+}
+
+
