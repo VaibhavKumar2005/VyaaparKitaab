@@ -7,10 +7,69 @@ import pytest
 os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/vyaapardb")
 os.environ.setdefault("ENV", "testing")
 
-from app.cores.database import engine
+from app.cores.database import SessionLocal, engine
 from app.main import app
+from app.models.business import Business, Product
 from app.models.user import User
 from app.services.auth import get_current_user
+from sqlalchemy import select
+
+
+async def _ensure_test_seed() -> User:
+    async with SessionLocal() as session:
+        res = await session.execute(select(User).where(User.email == "demo@vyapaarkitaab.in"))
+        owner = res.scalars().first()
+        if not owner:
+            owner = User(
+                id=uuid4(),
+                email="demo@vyapaarkitaab.in",
+                hashed_password="test_hashed_password_123",
+                full_name="Rajendra Sharma",
+                phone="9876500001",
+                role="STORE_OWNER",
+                is_active=True,
+            )
+            session.add(owner)
+            await session.flush()
+
+        res_biz = await session.execute(select(Business).where(Business.owner_id == owner.id))
+        biz = res_biz.scalars().first()
+        if not biz:
+            biz = Business(
+                id=uuid4(),
+                name="Sharma General Store",
+                owner_id=owner.id,
+                gstin="07AAAAA0000A1Z5",
+                address="Shop 4, Main Market, Delhi",
+                phone="9876500001",
+            )
+            session.add(biz)
+            await session.flush()
+
+        prod_res = await session.execute(select(Product).where(Product.business_id == biz.id))
+        products = prod_res.scalars().all()
+        if len(products) < 2:
+            p1 = Product(
+                id=uuid4(),
+                business_id=biz.id,
+                name="Aashirvaad Atta 10kg",
+                sku=f"SKU-{uuid4().hex[:6]}",
+                selling_price=420.0,
+                cost_price=380.0,
+                stock_qty=50.0,
+            )
+            p2 = Product(
+                id=uuid4(),
+                business_id=biz.id,
+                name="Fortune Mustard Oil 1L",
+                sku=f"SKU-{uuid4().hex[:6]}",
+                selling_price=160.0,
+                cost_price=140.0,
+                stock_qty=40.0,
+            )
+            session.add_all([p1, p2])
+        await session.commit()
+        return owner
 from app.services.forecasting import (
     _compute_mae_rmse,
     _holt_linear_forecast,
@@ -83,11 +142,7 @@ async def test_create_invoice_computes_subtotal_gst_and_total() -> None:
     subtotal, 5% GST tax_amount, total_amount, and stock deduction.
     """
     await engine.dispose()
-    owner = User(
-        id=UUID("10f42a49-1e4f-4991-8bae-786704921c2e"),
-        email="demo@vyapaarkitaab.in",
-        role="STORE_OWNER",
-    )
+    owner = await _ensure_test_seed()
     app.dependency_overrides[get_current_user] = lambda: owner
     transport = httpx.ASGITransport(app=app)
     try:
@@ -141,11 +196,7 @@ async def test_customer_and_product_update_delete_crud_and_ai_endpoint() -> None
     plus the live AI demand & cash-flow forecast endpoint (/api/v1/ai/forecast).
     """
     await engine.dispose()
-    owner = User(
-        id=UUID("10f42a49-1e4f-4991-8bae-786704921c2e"),
-        email="demo@vyapaarkitaab.in",
-        role="STORE_OWNER",
-    )
+    owner = await _ensure_test_seed()
     app.dependency_overrides[get_current_user] = lambda: owner
     transport = httpx.ASGITransport(app=app)
     try:

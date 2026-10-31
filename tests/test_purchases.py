@@ -95,19 +95,28 @@ async def test_personal_purchases_crud_and_isolation():
     Verifies end-to-end CRUD, AES encryption at rest, duplicate blind-index protection,
     and strict multi-tenant isolation so no other user can leak or retrieve the purchase.
     """
-    from app.cores.database import engine
+    from app.cores.database import SessionLocal, engine
     await engine.dispose()
 
     user_a = User(
         id=UUID("602a1564-0036-4239-8fd6-b4ac99142721"),
-        email="vaibhavkrsharma0412@gmail.com",
+        email=f"usera_{uuid4().hex[:6]}@test.in",
+        hashed_password="test_hashed_password_123",
         role="STORE_OWNER",
     )
     user_b = User(
         id=UUID("10f42a49-1e4f-4991-8bae-786704921c2e"),
-        email="demo@vyapaarkitaab.in",
+        email=f"userb_{uuid4().hex[:6]}@test.in",
+        hashed_password="test_hashed_password_123",
         role="STORE_OWNER",
     )
+
+    async with SessionLocal() as session:
+        for u in (user_a, user_b):
+            existing = await session.get(User, u.id)
+            if not existing:
+                session.add(u)
+        await session.commit()
 
     # Override current user as user_a
     app.dependency_overrides[get_current_user] = lambda: user_a
