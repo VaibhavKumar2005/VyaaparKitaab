@@ -8,40 +8,64 @@ on:
       - "tests/**"
       - ".github/workflows/backend-ci.yml"
   pull_request:
+    branches: ["main"]
     paths:
       - "backend/**"
       - "tests/**"
       - ".github/workflows/backend-ci.yml"
+  workflow_dispatch:
 
 jobs:
   test:
+    name: Lint & Pytest with PostgreSQL
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vyaapardb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
-        working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install ruff pytest
+          pip install -r backend/requirements.txt
+          pip install ruff pytest anyio
 
-      - name: Lint
-        env:
-          PYTHONPATH: backend
+      - name: Lint codebase with Ruff
         run: ruff check backend tests
 
-      - name: Test
-        working-directory: .
+      - name: Run Alembic migrations
+        working-directory: backend
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/vyaapardb
-          SECRET_KEY: ci-secret
+          PYTHONPATH: .
+        run: alembic upgrade head
+
+      - name: Run Pytest suite
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/vyaapardb
+          SECRET_KEY: ci-test-secret-key-32-chars-long!
           ENV: testing
           PYTHONPATH: backend
-        run: pytest -q
+        run: pytest -v --tb=short
