@@ -25,12 +25,14 @@ FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Automatically ensure all tables exist in PostgreSQL on boot (safe across dev and prod)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
     if settings.ENV.lower() == "development":
         from app.cores.database import SessionLocal
         from app.db.seed import seed_database_if_empty
 
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
         async with SessionLocal() as session:
             await seed_database_if_empty(session)
     yield

@@ -2,7 +2,7 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from app.cores.database import DATABASE_URL, Base
+from app.cores.database import DATABASE_URL, Base, engine_kwargs
 from sqlalchemy.ext.asyncio import create_async_engine
 
 config = context.config
@@ -23,7 +23,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    connectable = create_async_engine(DATABASE_URL)
+    connectable = create_async_engine(DATABASE_URL, **engine_kwargs)
 
     async def do_run():
         async with connectable.connect() as conn:
