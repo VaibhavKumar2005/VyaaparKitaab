@@ -12,3 +12,6 @@ httpx
 numpy
 pandas
 scikit-learn
+python-multipart
+Pillow
+pytesseract

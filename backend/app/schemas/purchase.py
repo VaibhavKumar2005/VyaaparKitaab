@@ -75,6 +75,10 @@ class ParsedInvoiceResponse(BaseModel):
     confidence: str = "HIGH"
 
 
+class OCRInvoiceResponse(ParsedInvoiceResponse):
+    extracted_text: str = Field(..., description="Text extracted from the image; not persisted by the API")
+
+
 class TransactionGraphNode(BaseModel):
     id: str
     label: str
@@ -194,6 +198,5 @@ class StoreDrilldownResponse(BaseModel):
     category_split: list[StoreCategorySplitItem]
     store_flow_nodes: list[TransactionGraphNode]
     store_flow_edges: list[TransactionGraphEdge]
-
 
 

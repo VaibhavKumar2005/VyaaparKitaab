@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +12,7 @@ from app.schemas.purchase import (
     CategoryBreakdownItem,
     DailySpendingItem,
     MarketplaceBreakdownItem,
+    OCRInvoiceResponse,
     OutgoingPaymentsSummaryResponse,
     ParsedInvoiceResponse,
     ParseInvoiceTextRequest,
@@ -30,6 +31,7 @@ from app.services.ml_models import (
     get_store_transaction_drilldown,
     summarize_payments_made_to_others,
 )
+from app.services.ocr import MAX_IMAGE_BYTES, extract_invoice_text
 
 router = APIRouter(prefix="/purchases", tags=["purchases"])
 
@@ -410,6 +412,21 @@ async def parse_invoice_text(
     return ParsedInvoiceResponse(**parsed)
 
 
+@router.post("/ocr-invoice", response_model=OCRInvoiceResponse)
+async def ocr_invoice(
+    file: UploadFile = File(..., description="Invoice image (JPEG, PNG, WebP, TIFF, or BMP; max 10 MB)"),
+    user: User = Depends(get_current_user),
+):
+    """
+    Extracts invoice text in memory and parses common marketplace receipt fields.
+    The uploaded image and extracted text are not persisted.
+    """
+    image_bytes = await file.read(MAX_IMAGE_BYTES + 1)
+    extracted_text = extract_invoice_text(image_bytes, file.content_type)
+    parsed = parse_marketplace_receipt_text(extracted_text)
+    return OCRInvoiceResponse(extracted_text=extracted_text, **parsed)
+
+
 @router.delete("/{purchase_id}", status_code=status.HTTP_200_OK)
 async def delete_purchase(
     purchase_id: UUID,
@@ -431,4 +448,3 @@ async def delete_purchase(
     await db.delete(purchase)
     await db.commit()
     return {"status": "success", "deleted_id": str(purchase_id)}
-

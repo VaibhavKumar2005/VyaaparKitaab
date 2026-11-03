@@ -14,5 +14,7 @@ extend-immutable-calls = [
     "fastapi.Query",
     "fastapi.Header",
     "fastapi.Body",
+    "fastapi.File",
+    "fastapi.param_functions.File",
 ]
 

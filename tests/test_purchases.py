@@ -89,6 +89,32 @@ def test_parse_invoice_text_endpoint():
     assert data["amount"] == 799.0
 
 
+def test_ocr_invoice_endpoint(monkeypatch):
+    user = User(id=uuid4(), email="ocr-user@example.com", role="CUSTOMER")
+    app.dependency_overrides[get_current_user] = lambda: user
+    monkeypatch.setattr(
+        "app.routers.purchases.extract_invoice_text",
+        lambda image_bytes, content_type: (
+            "Amazon order 402-1112223-3334445 total ₹799.00 on 23-10-2026"
+        ),
+    )
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/api/v1/purchases/ocr-invoice",
+            files={"file": ("invoice.png", b"test-image", "image/png")},
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["extracted_text"].startswith("Amazon order")
+    assert data["order_id"] == "402-1112223-3334445"
+    assert data["amount"] == 799.0
+
+
 @pytest.mark.anyio
 async def test_personal_purchases_crud_and_isolation():
     """

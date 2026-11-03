@@ -301,7 +301,7 @@ VyaparKitaab
 - [ ] OTP-based transaction authentication
 - [ ] Payment integration
 - [ ] Automated purchase notifications
-- [ ] Invoice OCR
+- [x] Invoice OCR
 - [ ] Demand forecasting
 - [ ] AI business insights
 - [ ] Transaction classification
@@ -345,8 +345,28 @@ Or run locally with Uvicorn:
 
 ```bash
 pip install -r requirements.txt
+# Debian/Ubuntu: install the Tesseract runtime used by invoice OCR
+sudo apt-get install tesseract-ocr
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+### Invoice OCR API
+
+The authenticated `POST /api/v1/purchases/ocr-invoice` endpoint accepts a JPEG,
+PNG, WebP, TIFF, or BMP invoice image up to 10 MB. It runs Tesseract in memory,
+returns the extracted text, and applies the existing receipt parser to return
+the marketplace, order ID, amount, date, and item summary. Uploaded images and
+OCR text are not persisted.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/purchases/ocr-invoice \
+  -H "Authorization: Bearer <access-token>" \
+  -F "file=@invoice.png"
+```
+
+The Docker image installs the Tesseract runtime automatically. A `503` response
+means the server was started without the OCR Python packages or Tesseract
+runtime; the response includes the missing capability.
 
 ## Contributing
 
