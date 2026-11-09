@@ -67,6 +67,11 @@ export interface ParsedInvoiceResponse {
   confidence: string;
 }
 
+export interface OCRPurchaseResponse extends PersonalPurchase {
+  extracted_text: string;
+  confidence: string;
+}
+
 export interface TransactionGraphNode {
   id: string;
   label: string;
@@ -672,6 +677,23 @@ export async function parseInvoiceTextApi(text: string): Promise<ParsedInvoiceRe
   });
 }
 
+export async function saveOcrPurchaseApi(
+  file: File,
+  links: { businessId?: string; customerId?: string; category?: string; paymentMethod?: string } = {},
+): Promise<OCRPurchaseResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  if (links.businessId) form.append('business_id', links.businessId);
+  if (links.customerId) form.append('customer_id', links.customerId);
+  if (links.category) form.append('category', links.category);
+  if (links.paymentMethod) form.append('payment_method', links.paymentMethod);
+
+  return await apiFetch<OCRPurchaseResponse>('/purchases/ocr-invoice/save', {
+    method: 'POST',
+    body: form,
+  });
+}
+
 export function useTransactionGraph() {
   return useQuery<TransactionGraphResponse>({
     queryKey: ['transaction_graph'],
@@ -727,4 +749,3 @@ export function useStoreDrilldown(selectedStore: string | null) {
     refetchInterval: 15000,
   });
 }
-

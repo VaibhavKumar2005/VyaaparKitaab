@@ -1,11 +1,12 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cores.database import get_db
+from app.models.business import Business, Customer
 from app.models.purchase import PersonalPurchase
 from app.models.user import User
 from app.schemas.purchase import (
@@ -13,6 +14,7 @@ from app.schemas.purchase import (
     DailySpendingItem,
     MarketplaceBreakdownItem,
     OCRInvoiceResponse,
+    OCRPurchaseResponse,
     OutgoingPaymentsSummaryResponse,
     ParsedInvoiceResponse,
     ParseInvoiceTextRequest,
@@ -47,6 +49,24 @@ async def create_purchase(
     Fields like order_id and items_note are encrypted at rest with AES-128 Fernet.
     Enforces strict user isolation and duplicate check via HMAC blind index.
     """
+    if payload.customer_id is not None and payload.business_id is None:
+        raise HTTPException(status_code=400, detail="business_id is required when customer_id is provided")
+    if payload.business_id is not None:
+        business_res = await db.execute(
+            select(Business).where(Business.id == payload.business_id, Business.owner_id == user.id)
+        )
+        if business_res.scalar_one_or_none() is None:
+            raise HTTPException(status_code=403, detail="Not authorized for this business")
+    if payload.customer_id is not None:
+        customer_res = await db.execute(
+            select(Customer).where(
+                Customer.id == payload.customer_id,
+                Customer.business_id == payload.business_id,
+            )
+        )
+        if customer_res.scalar_one_or_none() is None:
+            raise HTTPException(status_code=400, detail="Customer does not belong to the selected business")
+
     bidx = blind_index(payload.order_id)
     dup_check = await db.execute(
         select(PersonalPurchase).where(
@@ -63,6 +83,8 @@ async def create_purchase(
 
     purchase = PersonalPurchase(
         user_id=user.id,
+        business_id=payload.business_id,
+        customer_id=payload.customer_id,
         marketplace=payload.marketplace.strip(),
         category=payload.category.strip() or "Shopping",
         amount=payload.amount,
@@ -425,6 +447,45 @@ async def ocr_invoice(
     extracted_text = extract_invoice_text(image_bytes, file.content_type)
     parsed = parse_marketplace_receipt_text(extracted_text)
     return OCRInvoiceResponse(extracted_text=extracted_text, **parsed)
+
+
+@router.post("/ocr-invoice/save", response_model=OCRPurchaseResponse, status_code=status.HTTP_201_CREATED)
+async def save_ocr_purchase(
+    file: UploadFile = File(..., description="Invoice image (JPEG, PNG, WebP, TIFF, or BMP; max 10 MB)"),
+    business_id: UUID | None = Form(default=None),
+    customer_id: UUID | None = Form(default=None),
+    category: str = Form(default="Shopping", max_length=100),
+    payment_method: str | None = Form(default="UPI (Google Pay)", max_length=50),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """OCR an invoice and persist the purchase with optional business/customer links."""
+    image_bytes = await file.read(MAX_IMAGE_BYTES + 1)
+    extracted_text = extract_invoice_text(image_bytes, file.content_type)
+    parsed = parse_marketplace_receipt_text(extracted_text)
+    if not parsed["order_id"] or parsed["amount"] is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="OCR could not identify both an order ID and total amount; review the receipt and try again",
+        )
+
+    purchase_payload = PurchaseCreate(
+        marketplace=parsed["marketplace"],
+        category=category,
+        amount=parsed["amount"],
+        purchased_at=parsed["purchased_at"],
+        order_id=parsed["order_id"],
+        items_note=parsed["items_summary"],
+        payment_method=payment_method,
+        business_id=business_id,
+        customer_id=customer_id,
+    )
+    purchase = await create_purchase(purchase_payload, db=db, user=user)
+    return OCRPurchaseResponse(
+        **PurchaseRead.model_validate(purchase).model_dump(),
+        extracted_text=extracted_text,
+        confidence=parsed["confidence"],
+    )
 
 
 @router.delete("/{purchase_id}", status_code=status.HTTP_200_OK)

@@ -20,6 +20,12 @@ class PersonalPurchase(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    business_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("businesses.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    customer_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     marketplace: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     category: Mapped[str] = mapped_column(String(100), nullable=False, default="Shopping", index=True)
@@ -38,8 +44,9 @@ class PersonalPurchase(Base):
     )
 
     user = relationship("User", backref="personal_purchases")
+    business = relationship("Business", backref="personal_purchases")
+    customer = relationship("Customer", backref="personal_purchases")
 
     __table_args__ = (
         UniqueConstraint("user_id", "marketplace", "order_id_bidx", name="uq_user_mkt_order_bidx"),
     )
-

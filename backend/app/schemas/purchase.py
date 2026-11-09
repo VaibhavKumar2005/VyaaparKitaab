@@ -13,6 +13,8 @@ class PurchaseCreate(BaseModel):
     order_id: str = Field(..., min_length=1, max_length=255, description="Marketplace Order ID, encrypted at rest")
     items_note: str | None = Field(default=None, max_length=1024, description="Purchased items note, encrypted at rest")
     payment_method: str | None = Field(default="UPI (Google Pay)", max_length=50)
+    business_id: UUID | None = Field(default=None, description="Owned business associated with this purchase")
+    customer_id: UUID | None = Field(default=None, description="Customer associated with this purchase")
 
 
 class PurchaseRead(BaseModel):
@@ -27,6 +29,8 @@ class PurchaseRead(BaseModel):
     payment_method: str | None = None
     created_at: datetime
     is_encrypted: bool = True
+    business_id: UUID | None = None
+    customer_id: UUID | None = None
 
     model_config = {"from_attributes": True}
 
@@ -77,6 +81,18 @@ class ParsedInvoiceResponse(BaseModel):
 
 class OCRInvoiceResponse(ParsedInvoiceResponse):
     extracted_text: str = Field(..., description="Text extracted from the image; not persisted by the API")
+
+
+class OCRPurchaseCreate(BaseModel):
+    business_id: UUID | None = Field(default=None, description="Owned business associated with this purchase")
+    customer_id: UUID | None = Field(default=None, description="Customer associated with this purchase")
+    category: str = Field(default="Shopping", max_length=100)
+    payment_method: str | None = Field(default="UPI (Google Pay)", max_length=50)
+
+
+class OCRPurchaseResponse(PurchaseRead):
+    extracted_text: str = Field(..., description="Text extracted from the image; not persisted by the API")
+    confidence: str
 
 
 class TransactionGraphNode(BaseModel):
@@ -198,5 +214,4 @@ class StoreDrilldownResponse(BaseModel):
     category_split: list[StoreCategorySplitItem]
     store_flow_nodes: list[TransactionGraphNode]
     store_flow_edges: list[TransactionGraphEdge]
-
 
