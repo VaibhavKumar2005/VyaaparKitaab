@@ -2,10 +2,26 @@ import hashlib
 import hmac
 import uuid
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
 from app.cores.config import settings
+
+
+def build_upi_intent_uri(
+    *,
+    payee_vpa: str | None,
+    payee_name: str | None,
+    amount: float,
+    currency: str,
+    receipt: str,
+) -> str:
+    """Builds an NPCI-compliant UPI deep link / QR payload using merchant VPA when available."""
+    vpa = (payee_vpa or "").strip() or "vyapar@bank"
+    name = quote((payee_name or "VyaparKitaab").strip()[:60])
+    ref = quote(receipt.strip()[:35])
+    return f"upi://pay?pa={quote(vpa)}&pn={name}&am={amount:.2f}&cu={currency}&tr={ref}&tn=Invoice%20Payment"
 
 
 class PaymentService:
@@ -26,6 +42,8 @@ class PaymentService:
         currency: str = "INR",
         receipt: str | None = None,
         notes: dict[str, Any] | None = None,
+        payee_vpa: str | None = None,
+        payee_name: str | None = None,
     ) -> dict[str, Any]:
         """
         Creates an order with the payment gateway.
@@ -35,6 +53,13 @@ class PaymentService:
             raise ValueError("Order amount must be positive")
         notes = notes or {}
         receipt = receipt or f"rcpt_{uuid.uuid4().hex[:8]}"
+        upi_uri = build_upi_intent_uri(
+            payee_vpa=payee_vpa,
+            payee_name=payee_name,
+            amount=amount,
+            currency=currency,
+            receipt=receipt,
+        )
 
         if self.gateway == "razorpay":
             if not self.key_id or not self.key_secret:
@@ -71,15 +96,13 @@ class PaymentService:
                     "receipt": receipt,
                     "key_id": self.key_id,
                     "gateway": "razorpay",
+                    "upi_intent": upi_uri if payee_vpa else None,
                     "raw": data,
                 }
 
         # Sandbox implementation for local development & demonstration.
         # It is never used when production is configured for Razorpay.
         mock_order_id = f"order_mock_{uuid.uuid4().hex[:12]}"
-        upi_uri = (
-            f"upi://pay?pa=vyapar@bank&pn=VyaparKitaab&am={amount:.2f}&cu={currency}&tr={receipt}&tn=Invoice%20Payment"
-        )
         self._orders[mock_order_id] = {
             "amount": float(amount),
             "currency": currency,

@@ -17,12 +17,18 @@ export type Invoice = {
   type: string;
   subtotal: number;
   tax_amount: number;
+  gst_rate?: number;
   discount_amount: number;
   total_amount: number;
   paid_amount: number;
   status: string;
   payment_method?: string | null;
   created_at: string;
+  store_name?: string | null;
+  store_gstin?: string | null;
+  store_address?: string | null;
+  store_phone?: string | null;
+  store_upi_vpa?: string | null;
   items: Array<{
     id: string;
     product_id: string;
@@ -40,11 +46,46 @@ export function useInvoices() {
       if (isDemoMode()) {
         return getMockInvoices();
       }
-      try {
-        return await apiFetch<Invoice[]>('/invoices');
-      } catch {
-        return getMockInvoices();
-      }
+      return await apiFetch<Invoice[]>('/invoices');
+    },
+  });
+}
+
+export type CreateInvoicePayload = {
+  invoice_number: string;
+  business_id: string;
+  customer_id?: string | null;
+  type: 'SALE' | 'PURCHASE';
+  status: 'DRAFT' | 'CONFIRMED' | 'PAID';
+  subtotal: number;
+  tax_amount: number;
+  gst_rate?: number;
+  discount_amount: number;
+  total_amount: number;
+  paid_amount: number;
+  payment_method?: string | null;
+  items: Array<{
+    product_id: string;
+    quantity: number;
+    unit_price: number;
+    discount: number;
+  }>;
+};
+
+export function useCreateInvoice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: CreateInvoicePayload) =>
+      apiFetch<Invoice>('/invoices', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      void queryClient.invalidateQueries({ queryKey: ['products'] });
+      void queryClient.invalidateQueries({ queryKey: ['unified_transactions'] });
+      void queryClient.invalidateQueries({ queryKey: ['reconcile_suggestions'] });
     },
   });
 }

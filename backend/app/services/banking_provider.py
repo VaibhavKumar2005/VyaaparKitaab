@@ -6,6 +6,7 @@ Defines the pluggable provider interface for fetching bank account financial inf
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
@@ -186,13 +187,16 @@ class SetuAAProvider:
             )
 
         clean_phone = phone.strip().replace(" ", "").replace("+91", "")
+        clean_vua = (vua or "").strip()
+        if not clean_phone and not clean_vua:
+            raise ValueError("A mobile number or Account Aggregator VUA handle is required")
         now = datetime.now(UTC)
         from_iso = (now - timedelta(days=180)).strftime("%Y-%m-%dT%H:%M:%SZ")
         to_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         payload: dict[str, Any] = {
             "consentDuration": {"unit": "MONTH", "value": str(data_life_months)},
-            "vua": vua or f"{clean_phone}@onemoney",
+            "vua": clean_vua or f"{clean_phone}@onemoney",
             "dataRange": {"from": from_iso, "to": to_iso},
             "fiTypes": ["DEPOSIT"],
             "context": [],
@@ -250,6 +254,20 @@ class SetuAAProvider:
             )
             fetch_resp.raise_for_status()
             session_payload = fetch_resp.json()
+
+            # Real Setu AA sessions prepare FI data asynchronously; poll briefly until ready
+            for _ in range(5):
+                sess_status = str(session_payload.get("status", "")).upper()
+                has_fips = bool(session_payload.get("fips"))
+                if has_fips or sess_status in ("COMPLETED", "READY", "PARTIAL", "FAILED", "EXPIRED"):
+                    break
+                await asyncio.sleep(0.75)
+                poll_resp = await client.get(
+                    f"{base_url}/sessions/{session_id}",
+                    headers=self._headers(),
+                )
+                poll_resp.raise_for_status()
+                session_payload = poll_resp.json()
 
         return self._parse_setu_fi_credits(session_payload, default_masked_acc=masked_acc)
 

@@ -1,7 +1,18 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, Sparkles, TrendingUp, Wallet } from 'lucide-react';
+import {
+  AlertTriangle,
+  Building2,
+  FileText,
+  Layers,
+  LayoutGrid,
+  Sparkles,
+  TrendingUp,
+  Wallet,
+} from 'lucide-react';
 import { BankingIncomeExplorer } from '../components/BankingIncomeExplorer';
 import { PaymentBreakdownChart } from '../components/PaymentBreakdownChart';
+import { UnifiedCategoryPanel } from '../components/UnifiedCategoryPanel';
 import { ErrorState } from '../components/ui/ErrorState';
 import { LoadingState } from '../components/ui/LoadingState';
 import { StatusPill, paymentState } from '../components/StatusPill';
@@ -10,7 +21,10 @@ import { useInvoices } from '../hooks/useInvoices';
 import { useProducts } from '../hooks/useBusinessData';
 import { formatDate, formatINR, formatINRPrecise } from '../lib/format';
 
+type DashboardTab = 'overview' | 'unified' | 'statements' | 'ai_forecast' | 'all';
+
 export function StoreDashboard() {
+  const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const dash = useStoreDashboard();
   const inv = useInvoices();
   const prod = useProducts();
@@ -78,7 +92,15 @@ export function StoreDashboard() {
       </div>
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Summary">
-        <Summary label="Payments received (जमा)" value={formatINR(received)} note="Settled across all sales" />
+        <Summary
+          label="Payments received (जमा)"
+          value={formatINR(received)}
+          note={
+            (dash.data.totalDiscountsGiven ?? 0) > 0
+              ? `Discounts given: ${formatINR(dash.data.totalDiscountsGiven ?? 0)}`
+              : 'Settled across all sales'
+          }
+        />
         <Summary
           label="Outstanding Udhar (बाकी)"
           value={formatINR(outstanding)}
@@ -98,146 +120,269 @@ export function StoreDashboard() {
         />
       </section>
 
-      {/* Real Ingested Gateway & Google Pay / UPI Collections */}
-      <PaymentBreakdownChart />
+      {/* Segmented View Switcher: Prevents Vertical UI Stacking */}
+      <nav
+        className="no-print flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rule bg-canvas-sunk p-1.5"
+        aria-label="Dashboard Section Switcher"
+      >
+        <div className="flex flex-wrap items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setActiveTab('overview')}
+            className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-bold transition-all ${
+              activeTab === 'overview'
+                ? 'bg-navy text-white shadow-xs'
+                : 'text-ink-soft hover:bg-canvas hover:text-ink'
+            }`}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            <span>Overview &amp; Roznamcha</span>
+          </button>
 
-      {/* Connected Banking App: Inflow Income Explorer (RBI AA) */}
-      <BankingIncomeExplorer />
+          <button
+            type="button"
+            onClick={() => setActiveTab('unified')}
+            className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-bold transition-all ${
+              activeTab === 'unified'
+                ? 'bg-navy text-white shadow-xs'
+                : 'text-ink-soft hover:bg-canvas hover:text-ink'
+            }`}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            <span>Unified Ledger &amp; Ask AI</span>
+          </button>
 
-      {/* Roznamcha: Payment Mode Collection Split & Inventory Health */}
-      <section className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 rounded-lg border border-rule bg-canvas-raised p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-ink flex items-center gap-2">
-              <Wallet className="h-4 w-4 text-navy" />
-              Collection Mode Split (भुगतान माध्यम विवरण)
-            </h2>
-            <span className="num text-xs font-medium text-ink-soft">
-              Total Billed Sales: <strong className="text-ink">{formatINR(received + outstanding)}</strong>
+          <button
+            type="button"
+            onClick={() => setActiveTab('statements')}
+            className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-bold transition-all ${
+              activeTab === 'statements'
+                ? 'bg-navy text-white shadow-xs'
+                : 'text-ink-soft hover:bg-canvas hover:text-ink'
+            }`}
+          >
+            <FileText className="h-3.5 w-3.5" />
+            <span>PDF / UPI &amp; Bank Statements</span>
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                activeTab === 'statements'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-emerald-100 text-emerald-800'
+              }`}
+            >
+              PDF + AA
             </span>
-          </div>
+          </button>
 
-          {/* Segmented Progress Bar (Zero external chart library overhead) */}
-          <div className="h-3 w-full overflow-hidden rounded-full bg-canvas-sunk flex border border-rule">
-            {upiPct > 0 && (
-              <div style={{ width: `${upiPct}%` }} className="bg-navy transition-all" title={`UPI: ${upiPct}%`} />
+          <button
+            type="button"
+            onClick={() => setActiveTab('ai_forecast')}
+            className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-bold transition-all ${
+              activeTab === 'ai_forecast'
+                ? 'bg-navy text-white shadow-xs'
+                : 'text-ink-soft hover:bg-canvas hover:text-ink'
+            }`}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>AI Forecast &amp; Stock Alerts</span>
+            {ai.data && ai.data.critical_restock_count > 0 && (
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                  activeTab === 'ai_forecast' ? 'bg-white/20 text-white' : 'bg-due-tint text-due'
+                }`}
+              >
+                {ai.data.critical_restock_count} Critical
+              </span>
             )}
-            {cashPct > 0 && (
-              <div style={{ width: `${cashPct}%` }} className="bg-positive transition-all" title={`Cash: ${cashPct}%`} />
-            )}
-            {cardPct > 0 && (
-              <div style={{ width: `${cardPct}%` }} className="bg-ink-soft transition-all" title={`Card: ${cardPct}%`} />
-            )}
-            {udharPct > 0 && (
-              <div style={{ width: `${udharPct}%` }} className="bg-due transition-all" title={`Pending Udhar: ${udharPct}%`} />
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1 text-xs">
-            <div className="rounded-md border border-rule bg-canvas-sunk p-3">
-              <div className="flex items-center gap-1.5 text-ink-soft">
-                <span className="h-2 w-2 rounded-full bg-navy" />
-                <span>UPI QR / Online</span>
-              </div>
-              <p className="num mt-1 text-base font-bold text-ink">{formatINR(upiCollected)}</p>
-              <p className="text-[11px] text-ink-faint">{upiPct}% of volume</p>
-            </div>
-
-            <div className="rounded-md border border-rule bg-canvas-sunk p-3">
-              <div className="flex items-center gap-1.5 text-ink-soft">
-                <span className="h-2 w-2 rounded-full bg-positive" />
-                <span>Cash (नकद गल्ला)</span>
-              </div>
-              <p className="num mt-1 text-base font-bold text-ink">{formatINR(cashCollected)}</p>
-              <p className="text-[11px] text-ink-faint">{cashPct}% of volume</p>
-            </div>
-
-            <div className="rounded-md border border-rule bg-canvas-sunk p-3">
-              <div className="flex items-center gap-1.5 text-ink-soft">
-                <span className="h-2 w-2 rounded-full bg-ink-soft" />
-                <span>Card / Bank</span>
-              </div>
-              <p className="num mt-1 text-base font-bold text-ink">{formatINR(cardCollected)}</p>
-              <p className="text-[11px] text-ink-faint">{cardPct}% of volume</p>
-            </div>
-
-            <div className="rounded-md border border-rule bg-canvas-sunk p-3">
-              <div className="flex items-center gap-1.5 text-ink-soft">
-                <span className="h-2 w-2 rounded-full bg-due" />
-                <span>Unpaid Udhar</span>
-              </div>
-              <p className="num mt-1 text-base font-bold text-due">{formatINR(outstanding)}</p>
-              <p className="text-[11px] text-ink-faint">{udharPct}% pending</p>
-            </div>
-          </div>
-
-          {topProducts.length > 0 && (
-            <div className="border-t border-rule pt-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft mb-2 flex items-center gap-1.5">
-                <TrendingUp className="h-3.5 w-3.5 text-positive" /> Top Selling Items (सर्वाधिक बिक्री)
-              </p>
-              <div className="grid gap-2 sm:grid-cols-2 text-xs">
-                {topProducts.slice(0, 4).map((tp) => (
-                  <div key={tp.name} className="flex items-center justify-between rounded bg-canvas px-3 py-1.5 border border-rule">
-                    <span className="truncate font-medium text-ink pr-2">{tp.name}</span>
-                    <span className="num font-semibold text-navy shrink-0">{formatINR(tp.sales)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          </button>
         </div>
 
-        {/* Low Stock Reorder Watchlist */}
-        <div className="rounded-lg border border-rule bg-canvas-raised p-5 flex flex-col justify-between space-y-4">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-ink flex items-center gap-1.5">
-                <AlertTriangle className="h-4 w-4 text-due" />
-                Reorder Watchlist (कम स्टॉक)
-              </h2>
-              <Link to="/app/products" className="text-xs font-medium text-navy hover:underline">
-                Inventory
+        <button
+          type="button"
+          onClick={() => setActiveTab('all')}
+          className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+            activeTab === 'all'
+              ? 'bg-navy text-white shadow-xs'
+              : 'border border-rule bg-canvas text-ink-soft hover:text-ink'
+          }`}
+          title="Expand all sections for full-page printing"
+        >
+          <Layers className="h-3.5 w-3.5" />
+          <span>Show All</span>
+        </button>
+      </nav>
+
+      {/* TAB 1b: Store Unified Categories & AI Assistant */}
+      {(activeTab === 'unified' || activeTab === 'all') && (
+        <UnifiedCategoryPanel view="store" />
+      )}
+
+      {/* TAB 2: Real Ingested Gateway, PDF/CSV Statements & Connected Banking App */}
+      {(activeTab === 'statements' || activeTab === 'all') && (
+        <div className="space-y-6">
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-50/50 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-emerald-950">
+              <Building2 className="h-4 w-4 text-emerald-700 shrink-0" />
+              <span>
+                <strong>Web-Direct Statement Ingestion (Zero Mobile App Required):</strong> Upload realistic{' '}
+                <code className="font-mono font-bold">.pdf</code>, <code className="font-mono font-bold">.csv</code>, or{' '}
+                <code className="font-mono font-bold">.json</code> statements from Google Pay, PhonePe, Paytm, or SBI/HDFC directly below.
+              </span>
+            </div>
+          </div>
+          <BankingIncomeExplorer />
+          <PaymentBreakdownChart />
+        </div>
+      )}
+
+      {/* TAB 1: Roznamcha: Payment Mode Collection Split & Inventory Health */}
+      {(activeTab === 'overview' || activeTab === 'all') && (
+        <div className="space-y-6">
+          <section className="grid gap-6 lg:grid-cols-3">
+            <div className="lg:col-span-2 rounded-lg border border-rule bg-canvas-raised p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-bold text-ink flex items-center gap-2">
+                  <Wallet className="h-4 w-4 text-navy" />
+                  Collection Mode Split (भुगतान माध्यम विवरण)
+                </h2>
+                <span className="num text-xs font-medium text-ink-soft">
+                  Total Billed Sales: <strong className="text-ink">{formatINR(received + outstanding)}</strong>
+                </span>
+              </div>
+
+              {/* Segmented Progress Bar (Zero external chart library overhead) */}
+              <div className="h-3 w-full overflow-hidden rounded-full bg-canvas-sunk flex border border-rule">
+                {upiPct > 0 && (
+                  <div style={{ width: `${upiPct}%` }} className="bg-navy transition-all" title={`UPI: ${upiPct}%`} />
+                )}
+                {cashPct > 0 && (
+                  <div style={{ width: `${cashPct}%` }} className="bg-positive transition-all" title={`Cash: ${cashPct}%`} />
+                )}
+                {cardPct > 0 && (
+                  <div style={{ width: `${cardPct}%` }} className="bg-ink-soft transition-all" title={`Card: ${cardPct}%`} />
+                )}
+                {udharPct > 0 && (
+                  <div style={{ width: `${udharPct}%` }} className="bg-due transition-all" title={`Pending Udhar: ${udharPct}%`} />
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1 text-xs">
+                <div className="rounded-md border border-rule bg-canvas-sunk p-3">
+                  <div className="flex items-center gap-1.5 text-ink-soft">
+                    <span className="h-2 w-2 rounded-full bg-navy" />
+                    <span>UPI QR / Online</span>
+                  </div>
+                  <p className="num mt-1 text-base font-bold text-ink">{formatINR(upiCollected)}</p>
+                  <p className="text-[11px] text-ink-faint">{upiPct}% of volume</p>
+                </div>
+
+                <div className="rounded-md border border-rule bg-canvas-sunk p-3">
+                  <div className="flex items-center gap-1.5 text-ink-soft">
+                    <span className="h-2 w-2 rounded-full bg-positive" />
+                    <span>Cash (नकद गल्ला)</span>
+                  </div>
+                  <p className="num mt-1 text-base font-bold text-ink">{formatINR(cashCollected)}</p>
+                  <p className="text-[11px] text-ink-faint">{cashPct}% of volume</p>
+                </div>
+
+                <div className="rounded-md border border-rule bg-canvas-sunk p-3">
+                  <div className="flex items-center gap-1.5 text-ink-soft">
+                    <span className="h-2 w-2 rounded-full bg-ink-soft" />
+                    <span>Card / Bank</span>
+                  </div>
+                  <p className="num mt-1 text-base font-bold text-ink">{formatINR(cardCollected)}</p>
+                  <p className="text-[11px] text-ink-faint">{cardPct}% of volume</p>
+                </div>
+
+                <div className="rounded-md border border-rule bg-canvas-sunk p-3">
+                  <div className="flex items-center gap-1.5 text-ink-soft">
+                    <span className="h-2 w-2 rounded-full bg-due" />
+                    <span>Unpaid Udhar</span>
+                  </div>
+                  <p className="num mt-1 text-base font-bold text-due">{formatINR(outstanding)}</p>
+                  <p className="text-[11px] text-ink-faint">{udharPct}% pending</p>
+                </div>
+              </div>
+
+              {topProducts.length > 0 && (
+                <div className="border-t border-rule pt-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft mb-2 flex items-center gap-1.5">
+                    <TrendingUp className="h-3.5 w-3.5 text-positive" /> Top Selling Items (सर्वाधिक बिक्री)
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2 text-xs">
+                    {topProducts.slice(0, 4).map((tp) => (
+                      <div key={tp.name} className="flex items-center justify-between rounded bg-canvas px-3 py-1.5 border border-rule">
+                        <span className="truncate font-medium text-ink pr-2">{tp.name}</span>
+                        <span className="num font-semibold text-navy shrink-0">{formatINR(tp.sales)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Low Stock Reorder Watchlist */}
+            <div className="rounded-lg border border-rule bg-canvas-raised p-5 flex flex-col justify-between space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-bold text-ink flex items-center gap-1.5">
+                    <AlertTriangle className="h-4 w-4 text-due" />
+                    Reorder Watchlist (कम स्टॉक)
+                  </h2>
+                  <Link to="/app/products" className="text-xs font-medium text-navy hover:underline">
+                    Inventory
+                  </Link>
+                </div>
+                {lowStockList.length === 0 ? (
+                  <p className="text-xs text-ink-soft py-6 text-center">All products are well-stocked.</p>
+                ) : (
+                  <ul className="divide-y divide-rule text-xs">
+                    {lowStockList.map((item) => (
+                      <li key={item.id} className="py-2.5 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-ink">{item.name}</p>
+                          <p className="text-[11px] text-ink-faint">SKU: {item.sku ?? '—'}</p>
+                        </div>
+                        <span className="num shrink-0 rounded bg-due-tint px-2 py-0.5 font-bold text-due">
+                          {item.stock_qty} {item.unit ?? 'left'}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <Link
+                to="/app/invoices/new"
+                className="block w-full rounded-md border border-rule bg-canvas-sunk py-2 text-center text-xs font-semibold text-ink hover:bg-canvas"
+              >
+                Record Supplier Purchase Bill
               </Link>
             </div>
-            {lowStockList.length === 0 ? (
-              <p className="text-xs text-ink-soft py-6 text-center">All products are well-stocked.</p>
-            ) : (
-              <ul className="divide-y divide-rule text-xs">
-                {lowStockList.map((item) => (
-                  <li key={item.id} className="py-2.5 flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-ink">{item.name}</p>
-                      <p className="text-[11px] text-ink-faint">SKU: {item.sku ?? '—'}</p>
-                    </div>
-                    <span className="num shrink-0 rounded bg-due-tint px-2 py-0.5 font-bold text-due">
-                      {item.stock_qty} {item.unit ?? 'left'}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <Link
-            to="/app/invoices/new"
-            className="block w-full rounded-md border border-rule bg-canvas-sunk py-2 text-center text-xs font-semibold text-ink hover:bg-canvas"
-          >
-            Record Supplier Purchase Bill
-          </Link>
-        </div>
-      </section>
+          </section>
 
-      {/* AI/ML Demand & Cash-Flow Forecasting Section */}
-      {ai.data && (
+          <section aria-labelledby="recent">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h2 id="recent" className="text-lg font-semibold">Recent activity</h2>
+              <Link to="/app/invoices" className="text-sm font-medium text-navy hover:underline">
+                View all
+              </Link>
+            </div>
+            <TransactionTable rows={recent} />
+          </section>
+        </div>
+      )}
+
+      {/* TAB 3: AI/ML Demand & Cash-Flow Forecasting Section */}
+      {(activeTab === 'ai_forecast' || activeTab === 'all') && ai.data && (
         <section className="rounded-lg border border-rule bg-canvas-raised p-5 space-y-4" aria-label="AI Demand Forecast">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-sm font-bold text-ink flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-navy" />
-                AI Demand & Cash-Flow Forecast (AI मांग एवं नकदी पूर्वानुमान)
+                AI Demand &amp; Cash-Flow Forecast (AI मांग एवं नकदी पूर्वानुमान)
               </h2>
               <p className="text-xs text-ink-soft mt-0.5">
-                Chronological 80/20 validation • Active Model:{' '}
+                30-Day Rolling Window • Chronological 80/20 Validation • Active Model:{' '}
                 <strong className="text-navy">{ai.data.revenue_model.selected_model}</strong>
                 {ai.data.revenue_model.validation_metrics[ai.data.revenue_model.selected_model] && (
                   <span>
@@ -285,7 +430,7 @@ export function StoreDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-rule">
-                  {ai.data.inventory_forecasts.slice(0, 5).map((item) => (
+                  {ai.data.inventory_forecasts.slice(0, 8).map((item) => (
                     <tr key={item.product_id} className="hover:bg-canvas">
                       <td className="px-3 py-2 font-medium text-ink">
                         {item.name} <span className="text-ink-faint">({item.sku})</span>
@@ -323,16 +468,6 @@ export function StoreDashboard() {
           )}
         </section>
       )}
-
-      <section aria-labelledby="recent">
-        <div className="mb-3 flex items-baseline justify-between">
-          <h2 id="recent" className="text-lg font-semibold">Recent activity</h2>
-          <Link to="/app/invoices" className="text-sm font-medium text-navy hover:underline">
-            View all
-          </Link>
-        </div>
-        <TransactionTable rows={recent} />
-      </section>
     </div>
   );
 }

@@ -1,7 +1,10 @@
+import base64
+from datetime import datetime
 from typing import Any
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cores.database import get_db
@@ -16,11 +19,20 @@ from app.schemas.banking import (
 from app.services.account_aggregator import aa_service
 from app.services.auth import get_current_user
 from app.services.bank_stream_simulator import emit_simulated_credit, simulator_manager
+from app.services.reconcile import apply_bank_reconciliation, find_reconciliation_suggestions
 from app.services.statement_importer import (
+    PDFPasswordRequiredError,
+    build_sample_statement_pdf_bytes,
     clear_imported_transactions,
     get_personal_spending_analytics,
     import_statement_transactions,
     parse_statement_bytes,
+)
+from app.services.upi_bridge import (
+    get_or_create_bridge_config,
+    ingest_upi_bridge_event,
+    rotate_bridge_token,
+    verify_bridge_token,
 )
 
 router = APIRouter(prefix="/banking", tags=["banking-income"])
@@ -38,14 +50,17 @@ async def initiate_banking_consent(
     Directs the user to authenticate on their own banking app (SBI YONO, HDFC, ICICI, PhonePe AA).
     Persists consent in the banking_consents database table.
     """
-    return await aa_service.initiate_consent(
-        db=db,
-        user_id=user.id,
-        fip_id=payload.fip_id,
-        phone=payload.phone,
-        vua=payload.vua,
-        data_life_months=payload.data_life_months,
-    )
+    try:
+        return await aa_service.initiate_consent(
+            db=db,
+            user_id=user.id,
+            fip_id=payload.fip_id,
+            phone=payload.phone,
+            vua=payload.vua,
+            data_life_months=payload.data_life_months,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/consent/authorize", response_model=BankingConsentResponse)
@@ -118,7 +133,26 @@ async def banking_aa_webhook(
 
 class StatementUploadPayload(BaseModel):
     filename: str = "statement.csv"
-    content: str
+    content: str = ""
+    content_base64: str | None = None
+    pdf_password: str | None = None
+
+
+@router.get("/sample-statement.pdf")
+async def download_sample_statement_pdf() -> Response:
+    """
+    Generates and downloads a realistic, printable Indian UPI & Bank Statement PDF
+    (12 verified transactions across Google Pay, PhonePe, Paytm, and NEFT) that can be
+    uploaded directly into VyaparKitaab without needing a mobile application.
+    """
+    pdf_bytes = build_sample_statement_pdf_bytes()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": 'attachment; filename="realistic_upi_bank_statement.pdf"',
+        },
+    )
 
 
 @router.post("/import-statement")
@@ -129,20 +163,38 @@ async def upload_bank_or_upi_statement(
 ) -> dict[str, Any]:
     """
     Imports a real Bank (SBI, HDFC, ICICI, Axis) or UPI (Google Pay, PhonePe, Paytm)
-    CSV or JSON statement into PostgreSQL `bank_transactions`.
+    PDF, CSV, or JSON statement into PostgreSQL `bank_transactions`.
     """
-    raw_bytes = payload.content.encode("utf-8")
+    if payload.content_base64:
+        try:
+            raw_bytes = base64.b64decode(payload.content_base64)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid base64 file content: {exc}") from exc
+    else:
+        raw_bytes = payload.content.encode("utf-8")
+
     if not raw_bytes.strip():
         raise HTTPException(status_code=400, detail="Uploaded statement file is empty")
+    if len(raw_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Statement files must be 10 MB or smaller")
     try:
-        parsed_rows = parse_statement_bytes(raw_bytes, filename=payload.filename or "statement.csv")
+        parsed_rows = parse_statement_bytes(
+            raw_bytes,
+            filename=payload.filename or "statement.csv",
+            pdf_password=payload.pdf_password,
+        )
+    except PDFPasswordRequiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not parse statement file: {exc}") from exc
 
     if not parsed_rows:
         raise HTTPException(
             status_code=400,
-            detail="No valid transactions found. Ensure CSV/JSON has Date, Description/Narration, and Amount (or Debit/Credit) columns.",
+            detail="No valid transactions found. Ensure PDF/CSV/JSON has Date, Description/Narration, and Amount (or Debit/Credit) columns.",
         )
 
     result = await import_statement_transactions(
@@ -223,4 +275,118 @@ async def emit_single_bank_credit(
     Ideal for presentation triggers ("Emit One Test Credit") without waiting for the timer.
     """
     return await emit_simulated_credit(db=db, user_id=user.id)
+
+
+class UpiBridgeIngestPayload(BaseModel):
+    """Normalized or sanitized alert payload pushed from optional external UPI connectors."""
+
+    source_channel: str = Field(default="android_notification", max_length=64)
+    app_package: str = Field(default="", max_length=120)
+    title: str = Field(default="", max_length=300)
+    message: str = Field(default="", max_length=16000)
+    txn_id: str | None = Field(default=None, max_length=120)
+    timestamp: datetime | None = None
+    amount: float | None = Field(default=None, gt=0)
+    direction: str | None = Field(default=None, max_length=16)
+    counterparty: str | None = Field(default=None, max_length=180)
+    category: str | None = Field(default=None, max_length=80)
+    subcategory: str | None = Field(default=None, max_length=80)
+
+
+@router.get("/upi-bridge/config")
+async def get_upi_bridge_config(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Return the user's revocable scoped ingest token & copy-paste automation setup."""
+    api_base = str(request.base_url).rstrip("/")
+    return await get_or_create_bridge_config(db=db, user_id=user.id, api_base_url=api_base)
+
+
+@router.post("/upi-bridge/rotate-token")
+async def rotate_upi_bridge_token(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Rotate the scoped ingest token, immediately invalidating old device automations."""
+    api_base = str(request.base_url).rstrip("/")
+    return await rotate_bridge_token(db=db, user_id=user.id, api_base_url=api_base)
+
+
+@router.post("/upi-bridge/ingest")
+async def ingest_upi_bridge_webhook(
+    payload: UpiBridgeIngestPayload,
+    request: Request,
+    x_ingest_token: str | None = Header(default=None, alias="X-Ingest-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Receive GPay / Paytm / PhonePe / Bank SMS alerts authenticated solely by a
+    scoped revocable X-Ingest-Token header (never stores user passwords or OAuth tokens).
+    """
+    if "token" in request.query_params or "ingest_token" in request.query_params:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Do not pass ingest tokens in URL query parameters; use the X-Ingest-Token header.",
+        )
+    if not x_ingest_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-Ingest-Token header.",
+        )
+    user_id = await verify_bridge_token(db=db, token=x_ingest_token.strip())
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or rotated UPI bridge ingest token.",
+        )
+
+    return await ingest_upi_bridge_event(
+        db=db,
+        user_id=user_id,
+        message=payload.message,
+        title=payload.title,
+        app_package=payload.app_package,
+        source_channel=payload.source_channel,
+        txn_id=payload.txn_id,
+        timestamp=payload.timestamp,
+        amount=payload.amount,
+        direction=payload.direction,
+        counterparty=payload.counterparty,
+        category=payload.category,
+        subcategory=payload.subcategory,
+    )
+
+
+class ReconcileMatchPayload(BaseModel):
+    txn_id: str = Field(min_length=1, max_length=120)
+    invoice_id: UUID
+
+
+@router.get("/reconcile/suggestions")
+async def get_reconcile_suggestions(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Lists suggested pairings between imported real bank/UPI credits and unpaid store invoices."""
+    suggestions = await find_reconciliation_suggestions(db, user)
+    return {"suggestions": suggestions, "count": len(suggestions)}
+
+
+@router.post("/reconcile/match")
+async def match_bank_credit_to_invoice(
+    payload: ReconcileMatchPayload,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Settles an open store invoice against an imported real bank/UPI credit idempotently."""
+    return await apply_bank_reconciliation(
+        db,
+        user,
+        txn_id=payload.txn_id,
+        invoice_id=payload.invoice_id,
+    )
+
 

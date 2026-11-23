@@ -15,3 +15,4 @@ scikit-learn
 python-multipart
 Pillow
 pytesseract
+pypdf>=4

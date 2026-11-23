@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Lock,
   ShieldCheck,
@@ -16,6 +16,10 @@ import {
   Building2,
   Smartphone,
   Shield,
+  Upload,
+  FileText,
+  Layers,
+  LayoutGrid,
 } from 'lucide-react';
 import {
   usePersonalSpendingAnalytics,
@@ -25,12 +29,18 @@ import {
   usePaymentsToOthersSummary,
   useStoreDrilldown,
   parseInvoiceTextApi,
+  ocrInvoiceApi,
+  useOcrCapabilities,
   type CreatePurchasePayload,
+  type ParsedLineItem,
 } from '../hooks/usePurchases';
 import { formatINR, formatINRPrecise, formatDate } from '../lib/format';
-import { BankingIncomeExplorer } from '../components/BankingIncomeExplorer';
+import { CATEGORY_TAXONOMY, TAXONOMY_CATEGORIES } from '../lib/taxonomy';
 
-const MARKETPLACES = [
+export { CATEGORY_TAXONOMY };
+export const CATEGORIES = TAXONOMY_CATEGORIES;
+
+export const MARKETPLACES = [
   'Amazon',
   'Flipkart',
   'Blinkit',
@@ -41,22 +51,16 @@ const MARKETPLACES = [
   'Local Shop / Merchant',
   'Other',
 ];
-const CATEGORIES = [
-  'Electronics',
-  'Shopping',
-  'Groceries',
-  'Fashion & Apparel',
-  'Home & Kitchen',
-  'Health & Personal Care',
-  'Books',
-  'Food & Dining',
-];
-const PAYMENT_METHODS = [
+
+export const PAYMENT_METHODS = [
   'UPI (Google Pay)',
   'UPI (PhonePe)',
   'UPI (Paytm)',
+  'UPI',
+  'Cash',
   'Credit Card',
   'Debit Card',
+  'Bank Transfer (NEFT/IMPS)',
   'Cash on Delivery',
 ];
 
@@ -70,13 +74,21 @@ export function CustomerDashboard() {
   const createPurchaseMutation = useCreatePersonalPurchase();
   const deletePurchaseMutation = useDeletePersonalPurchase();
 
+  // Page Section Tab (prevents vertical UI stacking)
+  const [sectionTab, setSectionTab] = useState<'overview' | 'payees' | 'store_graph' | 'all'>('overview');
+  const [showSecurityInfo, setShowSecurityInfo] = useState(false);
+
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'form' | 'paste'>('form');
+  const [activeTab, setActiveTab] = useState<'form' | 'paste' | 'ocr'>('form');
+  const [ocrMode, setOcrMode] = useState<'auto' | 'hin' | 'handwriting'>('auto');
+  const ocrFileInputRef = useRef<HTMLInputElement | null>(null);
+  const { data: ocrCapabilities } = useOcrCapabilities();
 
   // Form Fields
   const [marketplace, setMarketplace] = useState('Amazon');
   const [category, setCategory] = useState('Shopping');
+  const [subcategory, setSubcategory] = useState<string>('General Shopping');
   const [amount, setAmount] = useState<string>('');
   const [orderId, setOrderId] = useState<string>('');
   const [itemsNote, setItemsNote] = useState<string>('');
@@ -85,15 +97,24 @@ export function CustomerDashboard() {
     () => new Date().toISOString().split('T')[0]
   );
 
-  // Paste / Auto-Extract State
+  // Paste / OCR Auto-Extract State
   const [rawInvoiceText, setRawInvoiceText] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractSuccessMsg, setExtractSuccessMsg] = useState<string | null>(null);
+  const [extractedMeta, setExtractedMeta] = useState<{
+    gstin?: string | null;
+    gstin_valid?: boolean;
+    tax_amount?: number;
+    discount_amount?: number;
+    subcategory?: string;
+    line_items?: ParsedLineItem[];
+  } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   const resetForm = () => {
     setMarketplace('Amazon');
     setCategory('Shopping');
+    setSubcategory('General Shopping');
     setAmount('');
     setOrderId('');
     setItemsNote('');
@@ -101,7 +122,47 @@ export function CustomerDashboard() {
     setPurchasedDate(new Date().toISOString().split('T')[0]);
     setRawInvoiceText('');
     setExtractSuccessMsg(null);
+    setExtractedMeta(null);
     setFormError(null);
+  };
+
+  const applyParsedInvoice = (parsed: Awaited<ReturnType<typeof parseInvoiceTextApi>>, sourceLabel: string) => {
+    if (parsed.marketplace && parsed.marketplace !== 'Unknown Merchant') {
+      setMarketplace(parsed.marketplace);
+    } else if (parsed.marketplace === 'Unknown Merchant') {
+      setMarketplace('');
+    }
+    if (parsed.order_id) setOrderId(parsed.order_id);
+    if (parsed.amount) setAmount(parsed.amount.toString());
+    if (parsed.items_summary) setItemsNote(parsed.items_summary);
+    const resolvedCat = parsed.category && CATEGORY_TAXONOMY[parsed.category] ? parsed.category : 'Shopping';
+    setCategory(resolvedCat);
+    const validSubs = CATEGORY_TAXONOMY[resolvedCat] ?? ['General'];
+    const resolvedSub =
+      parsed.subcategory && validSubs.includes(parsed.subcategory)
+        ? parsed.subcategory
+        : validSubs[validSubs.length - 1];
+    setSubcategory(resolvedSub);
+    if (parsed.payment_method) {
+      setPaymentMethod(parsed.payment_method);
+    }
+    if (parsed.purchased_at) {
+      setPurchasedDate(new Date(parsed.purchased_at).toISOString().split('T')[0]);
+    }
+    setExtractedMeta({
+      gstin: parsed.gstin,
+      gstin_valid: parsed.gstin_valid,
+      tax_amount: parsed.tax_amount,
+      discount_amount: parsed.discount_amount,
+      subcategory: resolvedSub,
+      line_items: parsed.line_items,
+    });
+    const gstNote = parsed.gstin ? ` · GSTIN ${parsed.gstin}` : '';
+    const subNote = ` (${resolvedCat} → ${resolvedSub})`;
+    setExtractSuccessMsg(
+      `${sourceLabel}: ${parsed.marketplace} · Ref #${parsed.order_id ?? 'N/A'} · ₹${parsed.amount ?? 0}${subNote}${gstNote}`
+    );
+    setActiveTab('form');
   };
 
   const handleOpenModal = () => {
@@ -124,21 +185,32 @@ export function CustomerDashboard() {
     setExtractSuccessMsg(null);
     try {
       const parsed = await parseInvoiceTextApi(rawInvoiceText);
-      if (parsed.marketplace) setMarketplace(parsed.marketplace);
-      if (parsed.order_id) setOrderId(parsed.order_id);
-      if (parsed.amount) setAmount(parsed.amount.toString());
-      if (parsed.items_summary) setItemsNote(parsed.items_summary);
-      if (parsed.purchased_at) {
-        setPurchasedDate(new Date(parsed.purchased_at).toISOString().split('T')[0]);
-      }
-      setExtractSuccessMsg(
-        `Extracted details from ${parsed.marketplace}: Order #${parsed.order_id ?? 'N/A'}, Amount ₹${parsed.amount ?? 0}`
-      );
-      // Auto-switch to review form
-      setActiveTab('form');
+      applyParsedInvoice(parsed, 'Extracted from text');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to extract invoice text';
       setFormError(`Extraction failed: ${msg}. You can enter details manually.`);
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  const handleOcrFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setIsExtracting(true);
+    setFormError(null);
+    setExtractSuccessMsg(null);
+    try {
+      const ocrRes = await ocrInvoiceApi(file, {
+        lang: ocrMode === 'auto' ? 'auto' : 'hin+eng',
+        handwriting: ocrMode === 'handwriting',
+      });
+      setRawInvoiceText(ocrRes.extracted_text || '');
+      applyParsedInvoice(ocrRes, `OCR scanned ${file.name}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to run OCR on file';
+      setFormError(`OCR failed: ${msg}. Try pasting receipt text or entering details manually.`);
     } finally {
       setIsExtracting(false);
     }
@@ -158,12 +230,19 @@ export function CustomerDashboard() {
       return;
     }
 
+    const parsedDate = purchasedDate ? new Date(purchasedDate) : new Date();
+    if (Number.isNaN(parsedDate.getTime())) {
+      setFormError('Please enter a valid purchase date.');
+      return;
+    }
+
     const payload: CreatePurchasePayload = {
       marketplace: marketplace.trim(),
       category: category.trim() || 'Shopping',
+      subcategory: subcategory.trim() || undefined,
       amount: parsedAmount,
       currency: 'INR',
-      purchased_at: new Date(purchasedDate).toISOString(),
+      purchased_at: parsedDate.toISOString(),
       order_id: orderId.trim(),
       items_note: itemsNote.trim() || undefined,
       payment_method: paymentMethod.trim() || 'UPI (Google Pay)',
@@ -205,14 +284,20 @@ export function CustomerDashboard() {
       {/* Top Header & Confidentiality Shield */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-bold text-ink">Personal Spending & Cost Tracker</h1>
-            <span className="flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" /> AES-128 Fernet Encrypted
-            </span>
+            <button
+              type="button"
+              onClick={() => setShowSecurityInfo((prev) => !prev)}
+              className="flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
+              title="Toggle encryption & vault details"
+            >
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+              <span>AES-128 Fernet Encrypted</span>
+            </button>
           </div>
           <p className="mt-1 text-sm text-ink-soft">
-            Private, leak-proof ledger tracking your Amazon & marketplace purchases and daily costs incurred.
+            Private, leak-proof ledger tracking your marketplace purchases, OCR receipts, and daily costs incurred.
           </p>
         </div>
 
@@ -222,20 +307,22 @@ export function CustomerDashboard() {
           className="inline-flex items-center gap-2 rounded-lg bg-navy px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-navy/90 transition-colors"
         >
           <Plus className="h-4 w-4" />
-          <span>Record Purchase (खरीद दर्ज करें)</span>
+          <span>Record / Scan Purchase (खरीद दर्ज करें)</span>
         </button>
       </div>
 
-      {/* Security Banner */}
-      <div className="rounded-lg border border-navy/20 bg-navy-tint/60 p-3.5 text-xs text-navy flex items-start gap-3">
-        <Lock className="h-4 w-4 shrink-0 text-navy mt-0.5" />
-        <div className="flex-1">
-          <p className="font-semibold">Closed & Isolated Personal Vault</p>
-          <p className="text-ink-soft mt-0.5 text-[11px]">
-            Your purchase amounts, order numbers, and item details are encrypted at rest with AES-128 and strictly isolated to your user account. Duplicate protection uses deterministic HMAC blind indexes without revealing plaintext identifiers.
-          </p>
+      {/* Collapsible Security Banner (Collapsed by default to prevent vertical clutter) */}
+      {showSecurityInfo && (
+        <div className="rounded-lg border border-navy/20 bg-navy-tint/60 p-3.5 text-xs text-navy flex items-start gap-3">
+          <Lock className="h-4 w-4 shrink-0 text-navy mt-0.5" />
+          <div className="flex-1">
+            <p className="font-semibold">Closed & Isolated Personal Vault</p>
+            <p className="text-ink-soft mt-0.5 text-[11px]">
+              Your purchase amounts, order numbers, and item details are encrypted at rest with AES-128 and strictly isolated to your user account. Duplicate protection uses deterministic HMAC blind indexes without revealing plaintext identifiers.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Real-Time Cost KPI Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -291,10 +378,68 @@ export function CustomerDashboard() {
         </div>
       </div>
 
-      {/* Connected Banking App: Inflow Income Explorer (RBI AA) */}
-      <BankingIncomeExplorer />
+      {/* Segmented View Switcher: Prevents Vertical UI Stacking */}
+      <nav
+        className="no-print flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rule bg-canvas-sunk p-1.5"
+        aria-label="Spending Tracker Section Switcher"
+      >
+        <div className="flex flex-wrap items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setSectionTab('overview')}
+            className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-bold transition-all ${
+              sectionTab === 'overview'
+                ? 'bg-navy text-white shadow-xs'
+                : 'text-ink-soft hover:bg-canvas hover:text-ink'
+            }`}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            <span>Overview &amp; Purchases Ledger</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSectionTab('payees')}
+            className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-bold transition-all ${
+              sectionTab === 'payees'
+                ? 'bg-navy text-white shadow-xs'
+                : 'text-ink-soft hover:bg-canvas hover:text-ink'
+            }`}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>ML Payee &amp; Cluster Intelligence</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSectionTab('store_graph')}
+            className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-bold transition-all ${
+              sectionTab === 'store_graph'
+                ? 'bg-navy text-white shadow-xs'
+                : 'text-ink-soft hover:bg-canvas hover:text-ink'
+            }`}
+          >
+            <Network className="h-3.5 w-3.5" />
+            <span>Store Drill-Down &amp; Routing Graph</span>
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setSectionTab('all')}
+          className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+            sectionTab === 'all'
+              ? 'bg-navy text-white shadow-xs'
+              : 'border border-rule bg-canvas text-ink-soft hover:text-ink'
+          }`}
+        >
+          <Layers className="h-3.5 w-3.5" />
+          <span>Show All</span>
+        </button>
+      </nav>
 
       {/* Daily Cost Timeline Bar Chart */}
+      {(sectionTab === 'overview' || sectionTab === 'all') && (
       <section className="rounded-xl border border-rule bg-canvas-raised p-5 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -359,9 +504,10 @@ export function CustomerDashboard() {
           </div>
         )}
       </section>
+      )}
 
       {/* Summary of Payments Made to Others (ML Payee Intelligence) */}
-      {paymentsSummary && (
+      {(sectionTab === 'payees' || sectionTab === 'all') && paymentsSummary && (
         <section className="rounded-xl border border-rule bg-canvas-raised p-5 shadow-sm space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
@@ -485,6 +631,8 @@ export function CustomerDashboard() {
       )}
 
       {/* Store-Specific Graphical Transaction Explorer (Store Drill-Down) */}
+      {(sectionTab === 'store_graph' || sectionTab === 'all') && (
+      <>
       {storeDrilldown && storeDrilldown.available_stores.length > 0 && (
         <section className="rounded-xl border-2 border-navy/25 bg-canvas-raised p-5 shadow-sm space-y-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1148,8 +1296,12 @@ export function CustomerDashboard() {
           </div>
         </div>
       </section>
+      </>
+      )}
 
       {/* Breakdowns: Marketplace Distribution + Categories */}
+      {(sectionTab === 'overview' || sectionTab === 'all') && (
+      <>
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Marketplace Breakdown */}
         <section className="rounded-xl border border-rule bg-canvas-raised p-5 shadow-sm space-y-4">
@@ -1307,6 +1459,8 @@ export function CustomerDashboard() {
           </div>
         )}
       </section>
+      </>
+      )}
 
       {/* Modal: Record Purchase with Auto-Extract & Manual Form */}
       {isModalOpen && (
@@ -1336,7 +1490,17 @@ export function CustomerDashboard() {
                   activeTab === 'form' ? 'bg-canvas-raised text-navy shadow-sm' : 'text-ink-soft hover:text-ink'
                 }`}
               >
-                Manual Details Form
+                Manual Form
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('ocr')}
+                className={`flex-1 rounded-md py-1.5 text-center transition-all flex items-center justify-center gap-1.5 ${
+                  activeTab === 'ocr' ? 'bg-canvas-raised text-navy shadow-sm' : 'text-ink-soft hover:text-ink'
+                }`}
+              >
+                <Upload className="h-3.5 w-3.5 text-navy" />
+                Upload Bill / PDF (OCR)
               </button>
               <button
                 type="button"
@@ -1346,7 +1510,7 @@ export function CustomerDashboard() {
                 }`}
               >
                 <Sparkles className="h-3.5 w-3.5 text-navy" />
-                Paste Amazon Receipt / Text
+                Paste Text / SMS
               </button>
             </div>
 
@@ -1357,9 +1521,107 @@ export function CustomerDashboard() {
               </div>
             )}
             {extractSuccessMsg && (
-              <div className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 p-2.5 text-xs text-emerald-800">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                <span>{extractSuccessMsg}</span>
+              <div className="space-y-1.5 rounded-lg border border-emerald-200 bg-emerald-50 p-2.5 text-xs text-emerald-800">
+                <div className="flex items-center gap-1.5 font-semibold">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>{extractSuccessMsg}</span>
+                </div>
+                {extractedMeta && (
+                  <div className="flex flex-wrap gap-1.5 pl-5 text-[11px]">
+                    {extractedMeta.gstin && (
+                      <span className="rounded bg-white px-2 py-0.5 border border-emerald-300 font-mono">
+                        GSTIN: {extractedMeta.gstin} ({extractedMeta.gstin_valid ? 'Valid Checksum' : 'Check Format'})
+                      </span>
+                    )}
+                    {(extractedMeta.tax_amount ?? 0) > 0 && (
+                      <span className="rounded bg-white px-2 py-0.5 border border-emerald-300 num">
+                        GST/Tax: {formatINRPrecise(extractedMeta.tax_amount ?? 0)}
+                      </span>
+                    )}
+                    {(extractedMeta.discount_amount ?? 0) > 0 && (
+                      <span className="rounded bg-white px-2 py-0.5 border border-emerald-300 num">
+                        Discount: {formatINRPrecise(extractedMeta.discount_amount ?? 0)}
+                      </span>
+                    )}
+                    {extractedMeta.line_items && extractedMeta.line_items.length > 0 && (
+                      <span className="rounded bg-white px-2 py-0.5 border border-emerald-300">
+                        {extractedMeta.line_items.length} line item(s) parsed
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab 3: Upload Invoice Image or PDF for In-Memory OCR */}
+            {activeTab === 'ocr' && (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-rule bg-canvas px-3 py-2.5 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-ink">Bill Script / Mode</span>
+                    {ocrCapabilities && (
+                      <span className="text-[10px] text-ink-soft">
+                        {ocrCapabilities.handwriting_vision_ready
+                          ? 'Hindi Handwriting AI Ready'
+                          : ocrCapabilities.hindi_offline_ready
+                            ? 'Offline Hindi (hin+eng) Ready'
+                            : 'Local Tesseract (English) · Set GEMINI_API_KEY or tesseract-ocr-hin for Hindi'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+                    {(
+                      [
+                        { id: 'auto', label: 'Auto (Eng + Hin)' },
+                        { id: 'hin', label: 'Hindi Printed' },
+                        { id: 'handwriting', label: 'Hindi Handwriting' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setOcrMode(opt.id)}
+                        className={`rounded-md border px-2 py-1.5 font-semibold transition-colors ${
+                          ocrMode === opt.id
+                            ? 'border-navy bg-navy text-white'
+                            : 'border-rule bg-canvas-raised text-ink-soft hover:text-ink'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <input
+                  ref={ocrFileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/tiff,image/bmp,application/pdf,.pdf"
+                  onChange={handleOcrFileUpload}
+                  className="hidden"
+                />
+                <div className="rounded-xl border-2 border-dashed border-rule bg-canvas p-6 text-center space-y-3">
+                  <FileText className="mx-auto h-8 w-8 text-navy" />
+                  <div>
+                    <p className="text-xs font-bold text-ink">
+                      Upload GST Tax Invoice, Hindi Kirana Parchaa, or Marketplace Receipt
+                    </p>
+                    <p className="mt-1 text-[11px] text-ink-soft">
+                      Supports PDF, PNG, JPEG, WebP, TIFF, BMP (up to 10 MB). Normalizes Devanagari digits (०-९) and extracts store, bill no, GST split, items, and totals.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => ocrFileInputRef.current?.click()}
+                    disabled={isExtracting}
+                    className="inline-flex items-center gap-2 rounded-lg bg-navy px-4 py-2 text-xs font-semibold text-white hover:bg-navy/90 disabled:opacity-50"
+                  >
+                    <Upload className="h-4 w-4" />
+                    <span>{isExtracting ? 'Running OCR & GST Extraction...' : 'Select Invoice Image / PDF'}</span>
+                  </button>
+                </div>
+                <p className="text-[11px] text-ink-faint text-center">
+                  🔒 Zero-persistence OCR: Image and extracted text are processed in memory and never stored on disk.
+                </p>
               </div>
             )}
 
@@ -1394,9 +1656,9 @@ export function CustomerDashboard() {
             {/* Tab 1: Form Inputs */}
             {activeTab === 'form' && (
               <form onSubmit={handleSubmitPurchase} className="space-y-3 text-xs">
-                {/* Marketplace chips */}
-                <div>
-                  <label className="font-semibold text-ink block mb-1">Marketplace</label>
+                {/* Marketplace chips + Editable Merchant Input */}
+                <div className="space-y-1.5">
+                  <label className="font-semibold text-ink block">Merchant / Marketplace</label>
                   <div className="flex flex-wrap gap-1.5">
                     {MARKETPLACES.map((m) => (
                       <button
@@ -1413,6 +1675,14 @@ export function CustomerDashboard() {
                       </button>
                     ))}
                   </div>
+                  <input
+                    type="text"
+                    required
+                    value={marketplace}
+                    onChange={(e) => setMarketplace(e.target.value)}
+                    placeholder="Or type store / merchant name (e.g. Sharma Kirana & General Store)"
+                    className="w-full rounded-lg border border-rule bg-canvas px-3 py-1.5 text-ink focus:border-navy focus:outline-none"
+                  />
                 </div>
 
                 {/* Amount & Date */}
@@ -1462,17 +1732,34 @@ export function CustomerDashboard() {
                   />
                 </div>
 
-                {/* Category & Payment Method */}
-                <div className="grid grid-cols-2 gap-3">
+                {/* Category, Subcategory & Payment Method */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="font-semibold text-ink block mb-1">Category</label>
                     <select
                       value={category}
-                      onChange={(e) => setCategory(e.target.value)}
+                      onChange={(e) => {
+                        const nextCat = e.target.value;
+                        setCategory(nextCat);
+                        const subs = CATEGORY_TAXONOMY[nextCat] ?? ['General'];
+                        setSubcategory(subs[subs.length - 1]);
+                      }}
                       className="w-full rounded-lg border border-rule bg-canvas px-2.5 py-1.5 text-ink focus:border-navy focus:outline-none"
                     >
                       {CATEGORIES.map((c) => (
                         <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="font-semibold text-ink block mb-1">Subcategory</label>
+                    <select
+                      value={subcategory}
+                      onChange={(e) => setSubcategory(e.target.value)}
+                      className="w-full rounded-lg border border-rule bg-canvas px-2.5 py-1.5 text-ink focus:border-navy focus:outline-none"
+                    >
+                      {(CATEGORY_TAXONOMY[category] ?? ['General']).map((sub) => (
+                        <option key={sub} value={sub}>{sub}</option>
                       ))}
                     </select>
                   </div>

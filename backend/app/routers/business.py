@@ -10,6 +10,7 @@ from app.models.user import User
 from app.schemas.business import (
     BusinessCreate,
     BusinessRead,
+    BusinessUpdate,
     CustomerCreate,
     CustomerRead,
     CustomerUpdate,
@@ -37,6 +38,21 @@ async def create_business(payload: BusinessCreate, db: AsyncSession = Depends(ge
 async def list_businesses(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     result = await db.execute(select(Business).where(Business.owner_id == user.id))
     return list(result.scalars().all())
+
+
+@router.put("/businesses/{business_id}", response_model=BusinessRead)
+async def update_business(
+    business_id: UUID,
+    payload: BusinessUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    business = await _owned_business(db, business_id, user)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(business, field, value)
+    await db.commit()
+    await db.refresh(business)
+    return business
 
 
 async def _owned_business(db: AsyncSession, business_id, user: User) -> Business:

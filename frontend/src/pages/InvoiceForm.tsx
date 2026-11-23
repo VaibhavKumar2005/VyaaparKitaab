@@ -1,8 +1,9 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, Receipt, Save } from 'lucide-react';
-import { useCustomers, useProducts } from '../hooks/useBusinessData';
-import { addMockInvoice } from '../mock/mockStore';
+import { useBusinesses, useCustomers, useProducts } from '../hooks/useBusinessData';
+import { useCreateInvoice } from '../hooks/useInvoices';
+import { addMockInvoice, isDemoMode } from '../mock/mockStore';
 import { useQueryClient } from '@tanstack/react-query';
 import { formatINRPrecise } from '../lib/format';
 
@@ -14,28 +15,59 @@ type LineItem = {
   discount: number;
 };
 
-const gstRate = 0.05; // 5% GST
+const GST_SLABS = [
+  { label: '0% (Exempt / Unregistered)', value: 0 },
+  { label: '5% (Essential / Kirana)', value: 0.05 },
+  { label: '12% (Standard Processed)', value: 0.12 },
+  { label: '18% (Electronics / Services)', value: 0.18 },
+  { label: '28% (Luxury / Auto)', value: 0.28 },
+];
 
 export function InvoiceForm() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
+  const demo = isDemoMode();
 
+  const { data: businesses } = useBusinesses();
   const { data: customers } = useCustomers();
   const { data: products } = useProducts();
+  const createInvoiceMutation = useCreateInvoice();
 
-  const preselectedCustId = searchParams.get('customer_id') ?? 'cust-001';
+  const preselectedCustId = searchParams.get('customer_id') ?? (demo ? 'cust-001' : '');
   const [customerId, setCustomerId] = useState(preselectedCustId);
   const [customCustomerName, setCustomCustomerName] = useState(searchParams.get('customer_name') ?? '');
   const [invoiceType, setInvoiceType] = useState<'SALE' | 'PURCHASE'>('SALE');
   const [paymentMethod, setPaymentMethod] = useState<'UPI' | 'CASH' | 'CARD' | 'CREDIT'>('UPI');
   const [invoiceStatus, setInvoiceStatus] = useState<'CONFIRMED' | 'DRAFT'>('CONFIRMED');
+  const [gstRate, setGstRate] = useState<number>(0.05);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const [items, setItems] = useState<LineItem[]>([
-    { productId: 'prod-001', productName: 'Fortune Sunlite Refined Sunflower Oil 1L', quantity: 10, unitPrice: 145, discount: 0 },
-    { productId: 'prod-002', productName: 'Aashirvaad Shudh Chakki Atta 10kg', quantity: 4, unitPrice: 420, discount: 50 },
-    { productId: 'prod-005', productName: 'Tata Tea Gold 500g', quantity: 6, unitPrice: 280, discount: 0 },
-  ]);
+  const [items, setItems] = useState<LineItem[]>(() =>
+    demo
+      ? [
+          { productId: 'prod-001', productName: 'Fortune Sunlite Refined Sunflower Oil 1L', quantity: 10, unitPrice: 145, discount: 0 },
+          { productId: 'prod-002', productName: 'Aashirvaad Shudh Chakki Atta 10kg', quantity: 4, unitPrice: 420, discount: 50 },
+          { productId: 'prod-005', productName: 'Tata Tea Gold 500g', quantity: 6, unitPrice: 280, discount: 0 },
+        ]
+      : [],
+  );
+
+  // Sync first real product once live catalog loads
+  useEffect(() => {
+    if (!demo && items.length === 0 && products && products.length > 0) {
+      const p = products[0];
+      setItems([
+        {
+          productId: p.id,
+          productName: p.name,
+          quantity: 1,
+          unitPrice: invoiceType === 'SALE' ? p.selling_price : (p.cost_price ?? p.selling_price * 0.8),
+          discount: 0,
+        },
+      ]);
+    }
+  }, [demo, items.length, products, invoiceType]);
 
   const totals = useMemo(() => {
     const subtotal = items.reduce(
@@ -44,7 +76,7 @@ export function InvoiceForm() {
     );
     const tax = subtotal * gstRate;
     return { subtotal, tax, total: subtotal + tax };
-  }, [items]);
+  }, [items, gstRate]);
 
   const handleProductSelect = (index: number, selectedProdId: string) => {
     const prod = products?.find((p) => p.id === selectedProdId);
@@ -84,39 +116,81 @@ export function InvoiceForm() {
     }
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
 
-    const invoiceNumber = `INV-2026-${Math.floor(100 + Math.random() * 900)}`;
-    const isPaid = invoiceStatus === 'CONFIRMED' && paymentMethod !== 'CREDIT';
+    const invoiceNumber = `INV-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+    const isPaid = invoiceStatus === 'CONFIRMED' && paymentMethod !== 'CREDIT' && paymentMethod !== 'UPI';
+    const finalStatus = isPaid ? 'PAID' : invoiceStatus;
+    const discountTotal = Math.round(items.reduce((s, i) => s + i.discount, 0) * 100) / 100;
 
-    const newInvoice = addMockInvoice({
-      invoice_number: invoiceNumber,
-      business_id: 'biz-001',
-      customer_id: customerId || null,
-      type: invoiceType,
-      subtotal: Math.round(totals.subtotal * 100) / 100,
-      tax_amount: Math.round(totals.tax * 100) / 100,
-      discount_amount: items.reduce((s, i) => s + i.discount, 0),
-      total_amount: Math.round(totals.total * 100) / 100,
-      paid_amount: isPaid ? Math.round(totals.total * 100) / 100 : 0,
-      status: invoiceStatus,
-      payment_method: isPaid ? paymentMethod : null,
-      items: items.map((it, idx) => ({
-        id: `item-new-${idx}-${Date.now().toString(36)}`,
-        product_id: it.productId,
-        quantity: it.quantity,
-        unit_price: it.unitPrice,
-        discount: it.discount,
-        line_total: Math.round((it.quantity * it.unitPrice - it.discount) * 100) / 100,
-      })),
-    });
+    if (demo) {
+      const newInvoice = addMockInvoice({
+        invoice_number: invoiceNumber,
+        business_id: 'biz-001',
+        customer_id: customerId || null,
+        type: invoiceType,
+        subtotal: Math.round(totals.subtotal * 100) / 100,
+        tax_amount: Math.round(totals.tax * 100) / 100,
+        gst_rate: gstRate,
+        discount_amount: discountTotal,
+        total_amount: Math.round(totals.total * 100) / 100,
+        paid_amount: isPaid ? Math.round(totals.total * 100) / 100 : 0,
+        status: finalStatus,
+        payment_method: isPaid ? paymentMethod : null,
+        items: items.map((it, idx) => ({
+          id: `item-new-${idx}-${Date.now().toString(36)}`,
+          product_id: it.productId,
+          quantity: it.quantity,
+          unit_price: it.unitPrice,
+          discount: it.discount,
+          line_total: Math.round((it.quantity * it.unitPrice - it.discount) * 100) / 100,
+        })),
+      });
 
-    queryClient.invalidateQueries({ queryKey: ['invoices'] });
-    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-    queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      navigate(`/app/invoices/${newInvoice.id}`);
+      return;
+    }
 
-    navigate(`/app/invoices/${newInvoice.id}`);
+    const businessId = businesses?.[0]?.id;
+    if (!businessId) {
+      setSubmitError('No active store found on your account. Please register a store first.');
+      return;
+    }
+    if (items.length === 0) {
+      setSubmitError('Add at least one product item before creating an invoice.');
+      return;
+    }
+
+    try {
+      const created = await createInvoiceMutation.mutateAsync({
+        invoice_number: invoiceNumber,
+        business_id: businessId,
+        customer_id: customerId || null,
+        type: invoiceType,
+        status: finalStatus,
+        subtotal: Math.round(totals.subtotal * 100) / 100,
+        tax_amount: Math.round(totals.tax * 100) / 100,
+        gst_rate: gstRate,
+        discount_amount: discountTotal,
+        total_amount: Math.round(totals.total * 100) / 100,
+        paid_amount: isPaid ? Math.round(totals.total * 100) / 100 : 0,
+        payment_method: paymentMethod,
+        items: items.map((it) => ({
+          product_id: it.productId,
+          quantity: it.quantity,
+          unit_price: it.unitPrice,
+          discount: it.discount,
+        })),
+      });
+      navigate(`/app/invoices/${created.id}`);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Unable to save invoice to PostgreSQL');
+    }
   };
 
   return (
@@ -142,7 +216,7 @@ export function InvoiceForm() {
           </div>
           <div className="flex items-center gap-2 rounded-md bg-navy-tint px-3 py-1.5 text-xs font-semibold text-navy">
             <Receipt className="h-4 w-4" />
-            <span>5% MSME GST Ready</span>
+            <span>{Math.round(gstRate * 100)}% GST Slab Active</span>
           </div>
         </div>
 
@@ -231,7 +305,16 @@ export function InvoiceForm() {
           </div>
 
           <div className="space-y-3">
-            {items.map((item, index) => {
+            {!demo && (products?.length ?? 0) === 0 ? (
+              <div className="rounded-md border border-dashed border-rule bg-canvas-sunk p-4 text-xs text-ink-soft">
+                Your store catalog has no products yet.{' '}
+                <Link to="/app/products" className="font-semibold text-navy hover:underline">
+                  Add products in Inventory Stock
+                </Link>{' '}
+                before issuing a bill.
+              </div>
+            ) : (
+              items.map((item, index) => {
               const lineTotal = Math.max(item.quantity * item.unitPrice - item.discount, 0);
               return (
                 <div
@@ -317,15 +400,31 @@ export function InvoiceForm() {
                   </div>
                 </div>
               );
-            })}
+            })
+            )}
           </div>
         </div>
 
         {/* Calculation summary and submission */}
         <div className="flex flex-col sm:flex-row justify-between items-start gap-6 border-t border-rule pt-4">
-          <div className="space-y-2">
-            <label className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Initial Status</label>
-            <div className="flex gap-4 text-xs font-medium text-ink">
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-ink-soft">GST Slab Rate</label>
+              <select
+                value={gstRate}
+                onChange={(e) => setGstRate(Number(e.target.value))}
+                className="mt-1.5 w-full rounded-md border border-rule bg-canvas px-3 py-2 text-xs font-semibold text-ink outline-none focus:border-navy"
+              >
+                {GST_SLABS.map((slab) => (
+                  <option key={slab.value} value={slab.value}>
+                    {slab.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Initial Status</label>
+              <div className="mt-1.5 flex gap-4 text-xs font-medium text-ink">
               <label className="flex items-center gap-1.5 cursor-pointer">
                 <input
                   type="radio"
@@ -346,6 +445,7 @@ export function InvoiceForm() {
                 />
                 <span>Save as Draft</span>
               </label>
+              </div>
             </div>
           </div>
 
@@ -355,7 +455,11 @@ export function InvoiceForm() {
               <span className="num font-medium text-ink">{formatINRPrecise(totals.subtotal)}</span>
             </div>
             <div className="flex justify-between text-ink-soft">
-              <span>GST (5%):</span>
+              <span>
+                {gstRate > 0
+                  ? `GST (${Math.round(gstRate * 100)}% = CGST ${(gstRate * 50).toFixed(1)}% + SGST ${(gstRate * 50).toFixed(1)}%):`
+                  : 'GST (0% Exempt):'}
+              </span>
               <span className="num font-medium text-ink">{formatINRPrecise(totals.tax)}</span>
             </div>
             <div className="flex justify-between border-t border-rule pt-2 text-base font-bold text-ink">
@@ -363,12 +467,25 @@ export function InvoiceForm() {
               <span className="num text-navy">{formatINRPrecise(totals.total)}</span>
             </div>
 
+            {submitError && (
+              <p role="alert" className="rounded-md bg-due-tint p-2.5 text-xs text-due">
+                {submitError}
+              </p>
+            )}
+
             <button
               type="submit"
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-navy px-4 py-2.5 font-semibold text-white hover:bg-navy-dark shadow-sm"
+              disabled={createInvoiceMutation.isPending || (!demo && items.length === 0)}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-navy px-4 py-2.5 font-semibold text-white hover:bg-navy-dark shadow-sm disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
-              <span>{invoiceStatus === 'CONFIRMED' ? 'Create & Confirm Invoice' : 'Save Invoice Draft'}</span>
+              <span>
+                {createInvoiceMutation.isPending
+                  ? 'Saving Invoice…'
+                  : invoiceStatus === 'CONFIRMED'
+                    ? 'Create & Confirm Invoice'
+                    : 'Save Invoice Draft'}
+              </span>
             </button>
           </div>
         </div>

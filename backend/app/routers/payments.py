@@ -21,6 +21,7 @@ from app.schemas.payment import (
 )
 from app.services.auth import get_current_user
 from app.services.customer_link import invoice_access_clause
+from app.services.otp import check_otp_code
 from app.services.payment import payment_service
 from app.services.payment_recorder import detect_upi_app, record_payment
 
@@ -55,10 +56,13 @@ async def create_payment_order(
     if amount_to_pay <= 0:
         raise HTTPException(status_code=400, detail="Invoice is already fully paid")
 
+    biz = (await db.execute(select(Business).where(Business.id == invoice.business_id))).scalar_one_or_none()
     order = await payment_service.create_order(
         amount=amount_to_pay,
         currency="INR",
         receipt=invoice.invoice_number,
+        payee_vpa=biz.upi_vpa if biz else None,
+        payee_name=biz.name if biz else None,
         notes={
             "invoice_id": str(invoice.id),
             "invoice_number": invoice.invoice_number,
@@ -130,6 +134,30 @@ async def verify_payment(
     )
     if not is_valid:
         raise HTTPException(status_code=400, detail="Invalid payment signature")
+
+    if payload.require_otp or (payload.otp_code is not None and payload.otp_code.strip() != ""):
+        if not payload.otp_code or not payload.otp_code.strip():
+            raise HTTPException(
+                status_code=400, detail="Transaction OTP authorization code is required"
+            )
+        otp_identifier = (
+            user.phone
+            if getattr(user, "phone", None) and getattr(user, "phone_verified", False)
+            else user.email
+        )
+        otp_valid = False
+        if otp_identifier:
+            otp_valid = await check_otp_code(
+                db, otp_identifier, payload.otp_code.strip(), purpose="TRANSACTION"
+            )
+        if not otp_valid and getattr(user, "phone", None):
+            otp_valid = await check_otp_code(
+                db, user.phone, payload.otp_code.strip(), purpose="TRANSACTION"
+            )
+        if not otp_valid:
+            raise HTTPException(
+                status_code=400, detail="Invalid or expired transaction authorization OTP"
+            )
 
     order_meta = payment_service.get_order_meta(payload.order_id)
     if (

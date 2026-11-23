@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.payment import Payment
 from app.models.transaction import Invoice
 from app.services.event_bus import publish_event
+from app.services.notifications import resolve_linked_customer_user
+from app.services.unified_ledger import sync_invoice_to_unified
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +153,24 @@ async def record_payment(
     invoice.pending_order_id = None
     invoice.pending_order_amount = None
 
+    # 4b. Sync canonical unified ledger + persist customer purchase notification
+    sse_customer_id = str(customer_id) if customer_id else None
+    if isinstance(db, AsyncSession):
+        await sync_invoice_to_unified(
+            db,
+            invoice,
+            app_name=app,
+            notify=True,
+            event_type="purchase.recorded",
+            event_key=f"pay:{payment_id}",
+            commit=False,
+        )
+        linked_user = await resolve_linked_customer_user(
+            db, UUID(str(customer_id)) if isinstance(customer_id, str) and customer_id else customer_id
+        )
+        if linked_user is not None:
+            sse_customer_id = str(linked_user.id)
+
     await db.commit()
     await db.refresh(invoice)
 
@@ -166,14 +186,14 @@ async def record_payment(
         "vpa": vpa,
         "app": app,
         "store_id": str(business_id),
-        "customer_id": str(customer_id) if customer_id else None,
+        "customer_id": sse_customer_id,
         "timestamp": datetime.now(UTC).isoformat(),
     }
     await publish_event(
         event_type="payment.captured",
         data=event_payload,
         store_id=str(business_id),
-        customer_id=str(customer_id) if customer_id else None,
+        customer_id=sse_customer_id,
         event_id=f"evt_{payment_id}",
     )
 

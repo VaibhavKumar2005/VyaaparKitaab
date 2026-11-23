@@ -5,12 +5,16 @@ on:
     branches: ["main"]
     paths:
       - "backend/**"
+      - "frontend/**"
+      - "AI/**"
       - "tests/**"
       - ".github/workflows/backend-ci.yml"
   pull_request:
     branches: ["main"]
     paths:
       - "backend/**"
+      - "frontend/**"
+      - "AI/**"
       - "tests/**"
       - ".github/workflows/backend-ci.yml"
   workflow_dispatch:
@@ -53,7 +57,7 @@ jobs:
           pip install ruff pytest anyio
 
       - name: Lint codebase with Ruff
-        run: ruff check backend tests
+        run: ruff check backend tests AI
 
       - name: Run Alembic migrations
         working-directory: backend
@@ -69,3 +73,26 @@ jobs:
           ENV: testing
           PYTHONPATH: backend
         run: pytest -v --tb=short
+
+  frontend:
+    name: Typecheck & Vite Production Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: TypeScript & Vite build
+        working-directory: frontend
+        run: ./node_modules/.bin/tsc -b && npm run build

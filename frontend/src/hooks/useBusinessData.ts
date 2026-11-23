@@ -13,6 +13,7 @@ export type Business = {
   gstin?: string | null;
   address?: string | null;
   phone?: string | null;
+  upi_vpa?: string | null;
   created_at: string;
 };
 
@@ -44,11 +45,7 @@ export function useBusinesses() {
       if (isDemoMode()) {
         return getMockBusinesses();
       }
-      try {
-        return await apiFetch<Business[]>('/businesses');
-      } catch {
-        return getMockBusinesses();
-      }
+      return await apiFetch<Business[]>('/businesses');
     },
   });
 }
@@ -60,11 +57,7 @@ export function useCustomers() {
       if (isDemoMode()) {
         return getMockCustomers();
       }
-      try {
-        return await apiFetch<Customer[]>('/customers');
-      } catch {
-        return getMockCustomers();
-      }
+      return await apiFetch<Customer[]>('/customers');
     },
   });
 }
@@ -76,11 +69,70 @@ export function useProducts() {
       if (isDemoMode()) {
         return getMockProducts();
       }
-      try {
-        return await apiFetch<Product[]>('/products');
-      } catch {
-        return getMockProducts();
-      }
+      return await apiFetch<Product[]>('/products');
+    },
+  });
+}
+
+export function useCreateCustomer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { name: string; phone?: string | null; email?: string | null; business_id: string }) =>
+      apiFetch<Customer>('/customers', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['customers'] });
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useCreateProduct() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: {
+      name: string;
+      sku?: string | null;
+      unit?: string | null;
+      selling_price: number;
+      cost_price?: number | null;
+      stock_qty: number;
+      business_id: string;
+    }) =>
+      apiFetch<Product>('/products', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['products'] });
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useUpdateBusiness() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...payload
+    }: {
+      id: string;
+      name?: string;
+      gstin?: string | null;
+      address?: string | null;
+      phone?: string | null;
+      upi_vpa?: string | null;
+    }) =>
+      apiFetch<Business>(`/businesses/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['businesses'] });
+      void queryClient.invalidateQueries({ queryKey: ['invoices'] });
     },
   });
 }

@@ -18,6 +18,7 @@ class Business(Base):
     gstin: Mapped[str | None] = mapped_column(EncryptedString(512), nullable=True)
     address: Mapped[str | None] = mapped_column(EncryptedString(1024), nullable=True)
     phone: Mapped[str | None] = mapped_column(EncryptedString(512), nullable=True)
+    upi_vpa: Mapped[str | None] = mapped_column(String(150), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

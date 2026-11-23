@@ -41,6 +41,7 @@ export function RegisterPage() {
   const [businessName, setBusinessName] = useState('');
   const [businessAddress, setBusinessAddress] = useState('');
   const [gstin, setGstin] = useState('');
+  const [upiVpa, setUpiVpa] = useState('');
   const [bankAccount, setBankAccount] = useState('');
   const [ifsc, setIfsc] = useState('');
   const [kycVerifying, setKycVerifying] = useState(false);
@@ -89,6 +90,7 @@ export function RegisterPage() {
         business_name: role === 'STORE_OWNER' ? businessName : undefined,
         gstin: role === 'STORE_OWNER' ? gstin.trim().toUpperCase() : undefined,
         address: role === 'STORE_OWNER' ? businessAddress : undefined,
+        upi_vpa: role === 'STORE_OWNER' ? upiVpa.trim() || undefined : undefined,
       });
       navigate(role === 'CUSTOMER' ? '/portal/bills' : '/app/dashboard');
     } catch (err) {
@@ -245,14 +247,25 @@ export function RegisterPage() {
               </div>
             </div>
 
-            <div>
-              <label className="text-xs font-semibold">Registered Shop Address</label>
-              <input
-                value={businessAddress}
-                onChange={(e) => setBusinessAddress(e.target.value)}
-                placeholder="Plot 42, Civil Lines, Mathura, UP - 281001"
-                className={inputClass}
-              />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="text-xs font-semibold">Registered Shop Address</label>
+                <input
+                  value={businessAddress}
+                  onChange={(e) => setBusinessAddress(e.target.value)}
+                  placeholder="Shop 12, Main Market, Sector 4"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold">Store UPI ID (For Invoice QR)</label>
+                <input
+                  value={upiVpa}
+                  onChange={(e) => setUpiVpa(e.target.value)}
+                  placeholder="myshop@okaxis (optional)"
+                  className={`${inputClass} font-mono`}
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

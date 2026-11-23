@@ -1,4 +1,5 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { NavLink, Outlet, Link, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Receipt,
@@ -9,22 +10,28 @@ import {
   RotateCcw,
   ShoppingBag,
   Database,
+  Settings,
   SlidersHorizontal,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useBusinesses } from '../hooks/useBusinessData';
 import { resetMockData } from '../mock/mockStore';
 import { useQueryClient } from '@tanstack/react-query';
+import { StoreSettingsModal } from './StoreSettingsModal';
 
 const tabs = [
   { to: '/app/dashboard', label: 'Financial Dashboard', icon: LayoutDashboard },
   { to: '/app/invoices', label: 'Invoices & Billing', icon: Receipt },
   { to: '/app/customers', label: 'Customers & Udhaar', icon: Users },
   { to: '/app/products', label: 'Inventory Stock', icon: Package },
-  { to: '/portal/bills', label: 'Customer Passbook', icon: ShoppingBag },
 ];
 
 export function AppShell() {
   const { user, logout, isDemo, enableDemo, disableDemo } = useAuth();
+  const { data: businesses } = useBusinesses();
+  const primaryBusiness = businesses?.[0];
+  const primaryStoreName = primaryBusiness?.name ?? 'Store Owner';
+  const [showSettings, setShowSettings] = useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -99,10 +106,29 @@ export function AppShell() {
 
         {/* User Account & Actions */}
         <div className="flex items-center gap-3">
+          {!isDemo && (
+            <button
+              type="button"
+              onClick={() => setShowSettings(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-rule bg-white px-2.5 py-1.5 text-xs font-medium text-ink-nav hover:text-ink hover:bg-canvas transition-colors"
+              title="Edit Store Name, GSTIN, Address & UPI ID"
+            >
+              <Settings className="h-3.5 w-3.5" />
+              <span className="hidden lg:inline">Store Settings</span>
+            </button>
+          )}
+          <Link
+            to="/portal/bills"
+            className="hidden lg:inline-flex items-center gap-1.5 rounded-md border border-rule bg-white px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-canvas transition-colors"
+            title="Switch to Customer Passbook view"
+          >
+            <ShoppingBag className="h-3.5 w-3.5" />
+            <span>Customer Passbook</span>
+          </Link>
           <div className="hidden md:block text-right text-xs">
             <p className="font-medium text-ink truncate max-w-[200px]">{user?.email ?? 'Merchant'}</p>
             <p className="text-[11px] text-ink-soft">
-              {!isDemo ? 'Store Owner (Sharma Kirana)' : 'Demo Sandbox Session'}
+              {!isDemo ? primaryStoreName : 'Demo Sandbox Session'}
             </p>
           </div>
           <button
@@ -175,6 +201,12 @@ export function AppShell() {
           <span>Real-time SSE Stream</span>
         </div>
       </footer>
+
+      <StoreSettingsModal
+        open={showSettings}
+        business={primaryBusiness}
+        onClose={() => setShowSettings(false)}
+      />
     </div>
   );
 }

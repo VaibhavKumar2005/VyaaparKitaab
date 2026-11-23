@@ -3,6 +3,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from app.cores.database import DATABASE_URL, Base, engine_kwargs
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 config = context.config
@@ -19,6 +20,8 @@ def run_migrations_offline() -> None:
     context.configure(url=url, target_metadata=target_metadata, literal_binds=True)
 
     with context.begin_transaction():
+        context.execute("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(128) NOT NULL PRIMARY KEY)")
+        context.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)")
         context.run_migrations()
 
 
@@ -33,6 +36,10 @@ def run_migrations_online() -> None:
     def do_run_migrations(connection):
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
+            connection.execute(
+                text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(128) NOT NULL PRIMARY KEY)")
+            )
+            connection.execute(text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)"))
             context.run_migrations()
 
     asyncio.run(do_run())

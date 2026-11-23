@@ -235,3 +235,57 @@ async def test_personal_purchases_crud_and_isolation():
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         await engine.dispose()
+
+
+def test_parse_marketplace_receipt_text_upi_gpay_and_vpa():
+    gpay_receipt = """
+    Paid ₹350.00 to Blue Tokai Coffee using HDFC Bank
+    UPI Ref ID: 431789123456
+    Date: 12 Nov 2026
+    Receipt sent from googlepay-noreply@google.com
+    """
+    res = parse_marketplace_receipt_text(gpay_receipt)
+    assert res["marketplace"] == "Blue Tokai Coffee"
+    assert res["order_id"] == "UPI-431789123456"
+    assert res["amount"] == 350.0
+    assert res["confidence"] == "HIGH"
+
+    vpa_only = """
+    Sent Rs. 925.00
+    Recipient VPA: rahul.sharma@okhdfcbank
+    UTR: 431711223344
+    Support email: support@hdfcbank.co.in
+    """
+    res_vpa = parse_marketplace_receipt_text(vpa_only)
+    assert res_vpa["marketplace"] == "rahul.sharma@okhdfcbank"
+    assert res_vpa["order_id"] == "UPI-431711223344"
+    assert res_vpa["amount"] == 925.0
+
+
+def test_ocr_invoice_real_pdf_upload():
+    user = User(id=uuid4(), email="pdf-ocr-user@example.com", role="CUSTOMER")
+    app.dependency_overrides[get_current_user] = lambda: user
+    client = TestClient(app)
+
+    minimal_pdf = (
+        b"%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+        b"3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n"
+        b"4 0 obj << /Length 100 >>\nstream\nBT\n"
+        b"(Paid to Metro Wholesale) Tj\n"
+        b"(Amount Paid: Rs. 680.00) Tj\n"
+        b"(UPI Transaction ID: 431799112233) Tj\n"
+        b"ET\nendstream\nendobj\ntrailer << /Root 1 0 R >>\n%%EOF\n"
+    )
+    try:
+        response = client.post(
+            "/api/v1/purchases/ocr-invoice",
+            files={"file": ("upi_receipt.pdf", minimal_pdf, "application/pdf")},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["marketplace"] == "Metro Wholesale"
+        assert data["order_id"] == "UPI-431799112233"
+        assert data["amount"] == 680.0
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)

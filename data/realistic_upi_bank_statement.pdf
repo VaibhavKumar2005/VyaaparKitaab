@@ -1,0 +1,54 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 2103 >>
+stream
+BT
+/F1 9 Tf
+36 790 Td
+14 TL
+(STATE BANK OF INDIA / UNIFIED UPI CONSOLIDATED STATEMENT \(REALISTIC SAMPLE\)) Tj
+T* (Account Holder: Sharma Kirana & General Store | Masked A/c: XXXX-XXXX-4821) Tj
+T* (Statement Period: October - November 2026 | Currency: INR) Tj
+T* (----------------------------------------------------------------------------------------) Tj
+T* (Date | Narration | Type | Amount | Mode | App | VPA) Tj
+T* (2026-11-01 | UPI/CR/631099281104/Rajesh Verma/Kirana Monthly Ration/OKAXIS | CREDIT | 3450.00 | UPI | Google Pay | rajesh.verma@okaxis) Tj
+T* (2026-11-02 | UPI/DR/631188273615/Blinkit Groceries/Daily Store Supplies/AXL | DEBIT | 840.00 | UPI | PhonePe | blinkit.pay@axl) Tj
+T* (2026-11-03 | UPI/CR/631277192837/Sunita Devi/Festival Grocery Bill/YBL | CREDIT | 2180.00 | UPI | PhonePe | sunita.devi@ybl) Tj
+T* (2026-11-04 | UPI/DR/631366541209/Amazon India/Thermal Receipt Printer Paper/OKICICI | DEBIT | 699.00 | UPI | Google Pay | amazon@okicici) Tj
+T* (2026-11-05 | NEFT/CR/SBIN2630918273/Metro Cash and Carry Rebate/Bonus Settlement | CREDIT | 14500.00 | NEFT | Bank NEFT | -) Tj
+T* (2026-11-06 | UPI/DR/631544392018/Tata Power Electricity/Shop Meter Bill/PAYTM | DEBIT | 2420.00 | UPI | Paytm | tatapower@paytm) Tj
+T* (2026-11-07 | UPI/CR/631633918274/Amit Kumar/Atta and Cooking Oil Settlement/OKHDFCBANK | CREDIT | 1890.00 | UPI | Google Pay | amit.k@okhdfcbank) Tj
+T* (2026-11-08 | UPI/DR/631722839105/Swiggy Food Delivery/Staff Evening Snacks/YBL | DEBIT | 465.00 | UPI | PhonePe | swiggy@ybl) Tj
+T* (2026-11-09 | UPI/CR/631811746592/Priya Nair/Household Provisions Bill/PAYTM | CREDIT | 2760.00 | UPI | Paytm | priya.nair@paytm) Tj
+T* (2026-11-10 | UPI/DR/631900654321/IndianOil Fuel Station/Delivery Scooter Petrol/OKSBI | DEBIT | 550.00 | UPI | Google Pay | indianoil@oksbi) Tj
+T* (2026-11-11 | UPI/DR/632011928374/Jio Fiber Broadband/Store WiFi & POS Recharge/OKAXIS | DEBIT | 999.00 | UPI | Google Pay | jiofiber@okaxis) Tj
+T* (2026-11-12 | UPI/CR/632122837465/Vikram Singh/Bulk Dry Fruits & Spices Order/YBL | CREDIT | 5640.00 | UPI | PhonePe | vikram.singh@ybl) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000002402 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+2472
+%%EOF

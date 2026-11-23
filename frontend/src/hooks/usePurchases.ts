@@ -50,6 +50,7 @@ export interface PersonalSpendingAnalytics {
 export interface CreatePurchasePayload {
   marketplace: string;
   category: string;
+  subcategory?: string;
   amount: number;
   currency?: string;
   purchased_at?: string;
@@ -58,13 +59,33 @@ export interface CreatePurchasePayload {
   payment_method?: string;
 }
 
+export interface ParsedLineItem {
+  description: string;
+  quantity: number;
+  unit_price?: number | null;
+  amount: number;
+  hsn_code?: string | null;
+}
+
 export interface ParsedInvoiceResponse {
   marketplace: string;
   order_id: string | null;
   amount: number | null;
+  tax_amount?: number;
+  discount_amount?: number;
+  gstin?: string | null;
+  gstin_valid?: boolean;
+  category?: string;
+  subcategory?: string;
+  payment_method?: string | null;
   purchased_at: string | null;
   items_summary: string | null;
+  line_items?: ParsedLineItem[];
   confidence: string;
+}
+
+export interface OCRInvoiceResponse extends ParsedInvoiceResponse {
+  extracted_text: string;
 }
 
 export interface OCRPurchaseResponse extends PersonalPurchase {
@@ -624,12 +645,7 @@ export function usePersonalSpendingAnalytics() {
       if (isDemoMode()) {
         return mockAnalytics;
       }
-      try {
-        return await apiFetch<PersonalSpendingAnalytics>('/purchases/analytics');
-      } catch (err) {
-        // Fallback gracefully if network drops
-        return mockAnalytics;
-      }
+      return await apiFetch<PersonalSpendingAnalytics>('/purchases/analytics');
     },
     refetchInterval: 15000, // Refresh automatically every 15s to keep real-time costs up to date
   });
@@ -639,6 +655,26 @@ export function useCreatePersonalPurchase() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (payload: CreatePurchasePayload) => {
+      if (isDemoMode()) {
+        const created: PersonalPurchase = {
+          id: `demo-pur-${Date.now()}`,
+          marketplace: payload.marketplace,
+          category: payload.category,
+          amount: payload.amount,
+          currency: payload.currency ?? 'INR',
+          purchased_at: payload.purchased_at ?? new Date().toISOString(),
+          order_id: payload.order_id,
+          items_note: payload.items_note ?? null,
+          payment_method: payload.payment_method ?? 'UPI (Google Pay)',
+          created_at: new Date().toISOString(),
+          is_encrypted: true,
+        };
+        mockAnalytics.recent_purchases = [created, ...mockAnalytics.recent_purchases];
+        mockAnalytics.total_orders += 1;
+        mockAnalytics.month_cost = Number((mockAnalytics.month_cost + payload.amount).toFixed(2));
+        mockAnalytics.today_cost = Number((mockAnalytics.today_cost + payload.amount).toFixed(2));
+        return created;
+      }
       return await apiFetch<PersonalPurchase>('/purchases', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -649,6 +685,7 @@ export function useCreatePersonalPurchase() {
       queryClient.invalidateQueries({ queryKey: ['transaction_graph'] });
       queryClient.invalidateQueries({ queryKey: ['payments_to_others_summary'] });
       queryClient.invalidateQueries({ queryKey: ['store_drilldown'] });
+      queryClient.invalidateQueries({ queryKey: ['unified_transactions'] });
     },
   });
 }
@@ -657,6 +694,10 @@ export function useDeletePersonalPurchase() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (purchaseId: string) => {
+      if (isDemoMode()) {
+        mockAnalytics.recent_purchases = mockAnalytics.recent_purchases.filter((p) => p.id !== purchaseId);
+        return { status: 'deleted', deleted_id: purchaseId };
+      }
       return await apiFetch<{ status: string; deleted_id: string }>(`/purchases/${purchaseId}`, {
         method: 'DELETE',
       });
@@ -666,14 +707,73 @@ export function useDeletePersonalPurchase() {
       queryClient.invalidateQueries({ queryKey: ['transaction_graph'] });
       queryClient.invalidateQueries({ queryKey: ['payments_to_others_summary'] });
       queryClient.invalidateQueries({ queryKey: ['store_drilldown'] });
+      queryClient.invalidateQueries({ queryKey: ['unified_transactions'] });
     },
   });
 }
 
 export async function parseInvoiceTextApi(text: string): Promise<ParsedInvoiceResponse> {
+  if (isDemoMode()) {
+    const amtMatch = text.match(/(?:grand\s*total|amount\s*paid|total)[:\s\-]*[₹Rs\.]*\s*([0-9,]+(?:\.[0-9]{1,2})?)/i);
+    const idMatch = text.match(/(?:order\s*#|invoice\s*(?:no\.?|#)[:\s\-]*|utr[:\s\-]*)([A-Za-z0-9\-/]{4,24})/i);
+    return {
+      marketplace: /flipkart/i.test(text) ? 'Flipkart' : /kirana/i.test(text) ? 'Sharma Kirana Store' : 'Amazon',
+      order_id: idMatch ? idMatch[1] : `DEMO-${Date.now().toString().slice(-6)}`,
+      amount: amtMatch ? Number(amtMatch[1].replace(/,/g, '')) : 499.0,
+      category: 'Shopping',
+      subcategory: 'General Shopping',
+      payment_method: 'UPI (Google Pay)',
+      purchased_at: new Date().toISOString(),
+      items_summary: text.trim().slice(0, 80),
+      confidence: idMatch && amtMatch ? 'HIGH' : 'MEDIUM',
+    };
+  }
   return await apiFetch<ParsedInvoiceResponse>('/purchases/parse-invoice-text', {
     method: 'POST',
     body: JSON.stringify({ invoice_text: text }),
+  });
+}
+
+export interface OcrCapabilities {
+  tesseract_available: boolean;
+  installed_languages: string[];
+  hindi_offline_ready: boolean;
+  handwriting_vision_ready: boolean;
+  supported_modes: string[];
+}
+
+export function useOcrCapabilities() {
+  return useQuery<OcrCapabilities>({
+    queryKey: ['ocr_capabilities'],
+    queryFn: async () => {
+      if (isDemoMode()) {
+        return {
+          tesseract_available: true,
+          installed_languages: ['eng', 'hin'],
+          hindi_offline_ready: true,
+          handwriting_vision_ready: false,
+          supported_modes: ['auto', 'eng', 'hin', 'handwriting'],
+        };
+      }
+      return await apiFetch<OcrCapabilities>('/purchases/ocr-capabilities');
+    },
+    staleTime: 60_000,
+  });
+}
+
+export async function ocrInvoiceApi(
+  file: File,
+  options: { lang?: string; handwriting?: boolean } = {},
+): Promise<OCRInvoiceResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const qs = new URLSearchParams();
+  if (options.lang) qs.set('lang', options.lang);
+  if (options.handwriting) qs.set('handwriting', 'true');
+  const query = qs.toString();
+  return await apiFetch<OCRInvoiceResponse>(`/purchases/ocr-invoice${query ? `?${query}` : ''}`, {
+    method: 'POST',
+    body: form,
   });
 }
 
@@ -701,11 +801,7 @@ export function useTransactionGraph() {
       if (isDemoMode()) {
         return mockGraph;
       }
-      try {
-        return await apiFetch<TransactionGraphResponse>('/purchases/transaction-graph');
-      } catch {
-        return mockGraph;
-      }
+      return await apiFetch<TransactionGraphResponse>('/purchases/transaction-graph');
     },
     refetchInterval: 15000,
   });
@@ -718,11 +814,7 @@ export function usePaymentsToOthersSummary() {
       if (isDemoMode()) {
         return mockPaymentsToOthers;
       }
-      try {
-        return await apiFetch<OutgoingPaymentsSummaryResponse>('/purchases/payments-to-others');
-      } catch {
-        return mockPaymentsToOthers;
-      }
+      return await apiFetch<OutgoingPaymentsSummaryResponse>('/purchases/payments-to-others');
     },
     refetchInterval: 15000,
   });
@@ -735,16 +827,8 @@ export function useStoreDrilldown(selectedStore: string | null) {
       if (isDemoMode()) {
         return buildMockStoreDrilldown(selectedStore);
       }
-      try {
-        const queryParam = selectedStore ? `?store=${encodeURIComponent(selectedStore)}` : '';
-        const res = await apiFetch<StoreDrilldownResponse>(`/purchases/store-drilldown${queryParam}`);
-        if (res.available_stores.length === 0) {
-          return buildMockStoreDrilldown(selectedStore);
-        }
-        return res;
-      } catch {
-        return buildMockStoreDrilldown(selectedStore);
-      }
+      const queryParam = selectedStore ? `?store=${encodeURIComponent(selectedStore)}` : '';
+      return await apiFetch<StoreDrilldownResponse>(`/purchases/store-drilldown${queryParam}`);
     },
     refetchInterval: 15000,
   });

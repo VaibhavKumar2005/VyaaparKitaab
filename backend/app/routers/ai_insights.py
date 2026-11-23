@@ -1,6 +1,7 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cores.database import get_db
@@ -8,6 +9,7 @@ from app.models.user import User
 from app.services.auth import get_current_user
 from app.services.forecasting import generate_business_ai_forecast
 from app.services.ml_models import summarize_payments_made_to_others
+from app.services.nl_assistant import answer_financial_question
 
 router = APIRouter(prefix="/ai", tags=["ai-forecasting"])
 
@@ -42,4 +44,21 @@ async def get_ai_outgoing_payments_summary(
     (KMeans payee clustering, Ridge/RandomForest outflow forecasting, IsolationForest anomaly detection).
     """
     return await summarize_payments_made_to_others(db=db, user=user)
+
+
+class AssistantQueryRequest(BaseModel):
+    question: str = Field(..., min_length=2, max_length=500)
+
+
+@router.post("/assistant")
+async def query_financial_assistant(
+    payload: AssistantQueryRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """
+    Data-grounded natural language assistant answering spending, discount, store revenue,
+    and forecast queries directly from `unified_transactions` and ML models.
+    """
+    return await answer_financial_question(db=db, user=user, question=payload.question)
 

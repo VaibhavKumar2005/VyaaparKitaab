@@ -4,14 +4,35 @@ import { ArrowLeft, Printer, QrCode, CheckCircle2, AlertCircle, CreditCard, Copy
 import { ErrorState } from '../components/ui/ErrorState';
 import { LoadingState } from '../components/ui/LoadingState';
 import { StatusPill, paymentState } from '../components/StatusPill';
+import { QrCodeSvg } from '../components/QrCodeSvg';
 import { useInvoice, useCreatePaymentOrder, useVerifyPayment, useUpdateInvoiceStatus, PaymentOrderData } from '../hooks/useInvoices';
-import { useCustomers, useProducts } from '../hooks/useBusinessData';
+import { useBusinesses, useCustomers, useProducts } from '../hooks/useBusinessData';
 import { formatDate, formatINRPrecise } from '../lib/format';
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
+  }
+}
+
+async function loadRazorpayCheckoutScript(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  if (window.Razorpay) return true;
+  return await new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => resolve(Boolean(window.Razorpay));
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
 
 export function InvoiceDetail() {
   const { id } = useParams();
   const inPortal = useLocation().pathname.startsWith('/portal');
   const { data, isPending, isError, refetch } = useInvoice(id);
+  const { data: businesses } = useBusinesses();
   const { data: customers } = useCustomers();
   const { data: products } = useProducts();
   const createOrder = useCreatePaymentOrder();
@@ -26,6 +47,12 @@ export function InvoiceDetail() {
 
   if (isPending) return <LoadingState label="Loading tax invoice details…" />;
   if (isError || !data) return <ErrorState label="Invoice not found or couldn't be loaded." onRetry={() => void refetch()} />;
+
+  const primaryBiz = !inPortal ? businesses?.[0] : undefined;
+  const sellerName = data.store_name ?? primaryBiz?.name ?? 'Registered Merchant Store';
+  const sellerGstin = data.store_gstin ?? primaryBiz?.gstin ?? null;
+  const sellerAddress = data.store_address ?? primaryBiz?.address ?? null;
+  const sellerPhone = data.store_phone ?? primaryBiz?.phone ?? null;
 
   const isSale = data.type === 'SALE';
   const customer = customers?.find((c) => c.id === data.customer_id);
@@ -45,6 +72,53 @@ export function InvoiceDetail() {
       const message = err instanceof Error ? err.message : 'Unable to initiate payment';
       setPaymentMsg(message);
     }
+  };
+
+  const handleOpenRazorpayCheckout = async () => {
+    if (!activeOrder) return;
+    setPaymentMsg(null);
+    const loaded = await loadRazorpayCheckoutScript();
+    if (!loaded || !window.Razorpay) {
+      setPaymentMsg('Could not load Razorpay Checkout widget. Check internet connection or CSP.');
+      return;
+    }
+    const rzp = new window.Razorpay({
+      key: activeOrder.key_id,
+      amount: Math.round(activeOrder.amount * 100),
+      currency: activeOrder.currency,
+      name: sellerName,
+      description: `Payment for ${data.invoice_number}`,
+      order_id: activeOrder.order_id,
+      handler: async (response: {
+        razorpay_order_id: string;
+        razorpay_payment_id: string;
+        razorpay_signature: string;
+      }) => {
+        try {
+          const res = await verifyPayment.mutateAsync({
+            invoice_id: data.id,
+            order_id: response.razorpay_order_id,
+            payment_id: response.razorpay_payment_id,
+            signature: response.razorpay_signature,
+            method: 'UPI',
+            amount: activeOrder.amount,
+          });
+          setPaymentMsg(res.message || 'Payment captured and verified!');
+          setActiveOrder(null);
+          void refetch();
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Payment signature verification failed';
+          setPaymentMsg(message);
+        }
+      },
+      prefill: {
+        name: customer?.name ?? '',
+        email: customer?.email ?? '',
+        contact: customer?.phone ?? '',
+      },
+      theme: { color: '#1b3b6f' },
+    });
+    rzp.open();
   };
 
   const handleSimulatePaymentCompletion = async () => {
@@ -137,10 +211,12 @@ export function InvoiceDetail() {
         <div className="grid gap-6 sm:grid-cols-2 text-sm">
           <div className="rounded-md border border-rule bg-canvas-sunk p-4 space-y-1">
             <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Billed By (विक्रेता)</p>
-            <p className="font-bold text-ink">Sharma Kirana & General Store</p>
-            <p className="text-xs text-ink-soft">GSTIN: <span className="font-mono text-ink">09AAACS1429B1Z8</span></p>
-            <p className="text-xs text-ink-soft">Plot 42, Civil Lines, Kanpur Road, Lucknow, UP</p>
-            <p className="text-xs text-ink-soft">Phone: +91 98765 43210</p>
+            <p className="font-bold text-ink">{sellerName}</p>
+            {sellerGstin && (
+              <p className="text-xs text-ink-soft">GSTIN: <span className="font-mono text-ink">{sellerGstin}</span></p>
+            )}
+            {sellerAddress && <p className="text-xs text-ink-soft">{sellerAddress}</p>}
+            {sellerPhone && <p className="text-xs text-ink-soft">Phone: {sellerPhone}</p>}
           </div>
 
           <div className="rounded-md border border-rule bg-canvas-sunk p-4 space-y-1">
@@ -207,7 +283,15 @@ export function InvoiceDetail() {
               <span className="num font-medium text-ink">{formatINRPrecise(data.subtotal)}</span>
             </div>
             <div className="flex justify-between text-ink-soft">
-              <span>GST Tax (कर):</span>
+              <span>
+                {(() => {
+                  const taxable = Math.max(data.subtotal - data.discount_amount, 0);
+                  if (data.tax_amount <= 0 || taxable <= 0) return 'GST Tax (0% Exempt):';
+                  const pct = Math.round((data.tax_amount / taxable) * 1000) / 10;
+                  const half = Math.round((pct / 2) * 10) / 10;
+                  return `GST Tax (${pct}% = CGST ${half}% + SGST ${half}%):`;
+                })()}
+              </span>
               <span className="num font-medium text-ink">{formatINRPrecise(data.tax_amount)}</span>
             </div>
             <div className="flex justify-between border-t border-rule pt-2 text-base font-bold text-ink">
@@ -336,16 +420,24 @@ export function InvoiceDetail() {
                 </div>
 
                 {activeOrder.upi_intent && (
-                  <div className="flex items-center justify-between gap-2 rounded bg-canvas-sunk p-2.5 text-xs font-mono text-ink-soft break-all border border-rule">
-                    <span className="truncate">{activeOrder.upi_intent}</span>
-                    <button
-                      type="button"
-                      onClick={handleCopyUPI}
-                      className="shrink-0 p-1 text-navy hover:text-navy-dark"
-                      title="Copy UPI String"
-                    >
-                      {copied ? <Check className="h-4 w-4 text-positive" /> : <Copy className="h-4 w-4" />}
-                    </button>
+                  <div className="flex flex-col sm:flex-row items-center gap-4">
+                    <QrCodeSvg value={activeOrder.upi_intent} size={156} label={`Pay ${sellerName} via UPI`} />
+                    <div className="flex-1 w-full space-y-2">
+                      <p className="text-xs text-ink-soft">
+                        Scan with any Indian UPI app (Google Pay, PhonePe, Paytm, BHIM) or copy the UPI payment link:
+                      </p>
+                      <div className="flex items-center justify-between gap-2 rounded bg-canvas-sunk p-2.5 text-xs font-mono text-ink-soft break-all border border-rule">
+                        <span className="truncate">{activeOrder.upi_intent}</span>
+                        <button
+                          type="button"
+                          onClick={handleCopyUPI}
+                          className="shrink-0 p-1 text-navy hover:text-navy-dark"
+                          title="Copy UPI String"
+                        >
+                          {copied ? <Check className="h-4 w-4 text-positive" /> : <Copy className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -357,15 +449,27 @@ export function InvoiceDetail() {
                   >
                     Cancel
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleSimulatePaymentCompletion}
-                    disabled={verifyPayment.isPending}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-positive px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-positive/90 disabled:opacity-50"
-                  >
-                    <CheckCircle2 className="h-4 w-4" />
-                    {verifyPayment.isPending ? 'Verifying payment…' : 'Simulate Instant Payment'}
-                  </button>
+                  {activeOrder.gateway === 'razorpay' ? (
+                    <button
+                      type="button"
+                      onClick={handleOpenRazorpayCheckout}
+                      disabled={verifyPayment.isPending}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-navy px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-navy-dark disabled:opacity-50"
+                    >
+                      <CreditCard className="h-4 w-4" />
+                      {verifyPayment.isPending ? 'Verifying payment…' : 'Open Razorpay Checkout (UPI / Card)'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleSimulatePaymentCompletion}
+                      disabled={verifyPayment.isPending}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-positive px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-positive/90 disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      {verifyPayment.isPending ? 'Verifying payment…' : 'Mark Paid (Sandbox Test)'}
+                    </button>
+                  )}
                 </div>
               </div>
             )}

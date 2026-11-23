@@ -267,3 +267,23 @@ async def test_customer_and_product_update_delete_crud_and_ai_endpoint() -> None
         app.dependency_overrides.pop(get_current_user, None)
         await engine.dispose()
 
+
+def test_pdf_statement_generation_and_parsing():
+    """Verifies pure-Python realistic PDF statement generation and extraction without a mobile app."""
+    from app.services.statement_importer import build_sample_statement_pdf_bytes, parse_statement_bytes
+
+    pdf_bytes = build_sample_statement_pdf_bytes()
+    assert pdf_bytes.startswith(b"%PDF-1.4")
+
+    rows = parse_statement_bytes(pdf_bytes, filename="realistic_upi_bank_statement.pdf")
+    assert len(rows) == 12
+    credits = [r for r in rows if r["type"] == "CREDIT"]
+    debits = [r for r in rows if r["type"] == "DEBIT"]
+    assert len(credits) == 6
+    assert len(debits) == 6
+    apps = {r["app"] for r in rows}
+    assert "Google Pay" in apps
+    assert "PhonePe" in apps
+    assert "Paytm" in apps
+
+

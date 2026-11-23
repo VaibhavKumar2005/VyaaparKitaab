@@ -9,7 +9,7 @@ class BankingConsentRequest(BaseModel):
         description="Financial Information Provider (FIP) Bank ID, e.g. sbi_yono, hdfc_bank, icici_imobile, axis_bank, phonepe_aa",
     )
     phone: str = Field(
-        default="9876543210",
+        default="",
         description="User mobile number linked to bank account for OTP/app authorization",
     )
     vua: str | None = Field(

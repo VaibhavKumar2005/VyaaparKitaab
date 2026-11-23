@@ -60,8 +60,9 @@ async def add_security_headers(request, call_next):
             "object-src 'none'; "
             "img-src 'self' data: blob:; "
             "style-src 'self' 'unsafe-inline'; "
-            "script-src 'self'; "
-            "connect-src 'self'"
+            "script-src 'self' https://checkout.razorpay.com; "
+            "frame-src https://api.razorpay.com https://checkout.razorpay.com; "
+            "connect-src 'self' https://api.razorpay.com https://lumberjack.razorpay.com"
         )
     return response
 

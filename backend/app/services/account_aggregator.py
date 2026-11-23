@@ -108,7 +108,7 @@ class AccountAggregatorService:
         db: AsyncSession,
         user_id: uuid.UUID | str,
         fip_id: str = "sbi_yono",
-        phone: str = "9876543210",
+        phone: str = "",
         vua: str | None = None,
         data_life_months: int = 6,
     ) -> BankingConsentResponse:
@@ -302,12 +302,27 @@ class AccountAggregatorService:
     ) -> IncomeStreamResponse:
         uid = uuid.UUID(str(user_id)) if not isinstance(user_id, uuid.UUID) else user_id
         consent = await self.get_active_consent(db, uid)
-        # If no active consent, provide a default demonstration consent so user sees the feature immediately
-        if not consent:
-            consent = await self.initiate_consent(db, user_id=uid, fip_id="sbi_yono")
-
         provider = get_bank_data_provider()
+
         if isinstance(provider, SetuAAProvider):
+            if not consent:
+                return IncomeStreamResponse(
+                    is_connected=False,
+                    active_consent=None,
+                    total_inward_income=0.0,
+                    total_credits_count=0,
+                    avg_ticket_size=0.0,
+                    monthly_trend=[],
+                    category_breakdown=[],
+                    recent_inflows=[],
+                    security_metadata={
+                        "zero_account_exposure": "Verified (No account number or login password stored)",
+                        "data_channel": "RBI Account Aggregator (Setu FIU)",
+                        "debit_risk": "0.0% (Strictly read-only)",
+                        "active_fip": "Not linked yet",
+                        "masked_account": "Not linked",
+                    },
+                )
             raw_inflows = await provider.fetch_inward_credits(
                 fip_id=consent.fip_id,
                 masked_acc=consent.masked_acc,
@@ -315,7 +330,7 @@ class AccountAggregatorService:
                 consent_id=consent.consent_id,
             )
         else:
-            # Prefer real imported statement CREDIT rows from PostgreSQL bank_transactions if present
+            # Prefer real imported statement / UPI-bridge CREDIT rows from PostgreSQL bank_transactions
             db_tx_res = await db.execute(
                 select(BankTransaction)
                 .where(BankTransaction.user_id == uid, BankTransaction.type == "CREDIT")
@@ -323,6 +338,7 @@ class AccountAggregatorService:
             )
             db_credits = db_tx_res.scalars().all()
             if db_credits:
+                fallback_acc = consent.masked_acc if consent else "Account Masked"
                 raw_inflows = [
                     {
                         "txn_id": r.txn_id,
@@ -334,20 +350,23 @@ class AccountAggregatorService:
                         "narration": r.narration,
                         "category": r.category,
                         "payer_identifier": r.counterparty,
-                        "masked_acc": r.masked_acc or consent.masked_acc,
+                        "masked_acc": r.masked_acc or fallback_acc,
                     }
                     for r in db_credits
                 ]
-            else:
+            elif consent:
                 raw_inflows = await provider.fetch_inward_credits(
                     fip_id=consent.fip_id,
                     masked_acc=consent.masked_acc,
                     user_id=str(uid),
                     consent_id=consent.consent_id,
                 )
+            else:
+                raw_inflows = []
+
         if not raw_inflows:
             return IncomeStreamResponse(
-                is_connected=consent.status == "APPROVED",
+                is_connected=consent is not None and consent.status == "APPROVED",
                 active_consent=consent,
                 total_inward_income=0.0,
                 total_credits_count=0,
@@ -359,8 +378,8 @@ class AccountAggregatorService:
                     "zero_account_exposure": "Verified (No account number or login password stored)",
                     "data_channel": "RBI Account Aggregator (FIP -> Sahamati AA -> FIU)",
                     "debit_risk": "0.0% (Cryptographically impossible to debit account)",
-                    "active_fip": consent.fip_name,
-                    "masked_account": consent.masked_acc,
+                    "active_fip": consent.fip_name if consent else "Not connected yet",
+                    "masked_account": consent.masked_acc if consent else "Not linked",
                 },
             )
         df = pd.DataFrame(raw_inflows)
@@ -408,10 +427,14 @@ class AccountAggregatorService:
             recent_inflows=recent_inflows,
             security_metadata={
                 "zero_account_exposure": "Verified (No account number or login password stored)",
-                "data_channel": "RBI Account Aggregator (FIP -> Sahamati AA -> FIU)",
+                "data_channel": (
+                    "RBI Account Aggregator (FIP -> Sahamati AA -> FIU)"
+                    if consent
+                    else "Statement Import / UPI Push Bridge"
+                ),
                 "debit_risk": "0.0% (Cryptographically impossible to debit account)",
-                "active_fip": consent.fip_name,
-                "masked_account": consent.masked_acc,
+                "active_fip": consent.fip_name if consent else "Imported Bank / UPI Credits",
+                "masked_account": consent.masked_acc if consent else "Account Masked",
             },
         )
 
@@ -423,8 +446,15 @@ class AccountAggregatorService:
         uid = uuid.UUID(str(user_id)) if not isinstance(user_id, uuid.UUID) else user_id
         stream = await self.get_income_stream(db, uid)
         consent = stream.active_consent
-        fip_name = consent.fip_name if consent else "Connected Bank App (via AA)"
-        fip_acc = consent.masked_acc if consent else "XXXX-XXXX-4821"
+        if consent:
+            fip_name = consent.fip_name
+            fip_acc = consent.masked_acc
+        elif stream.total_credits_count > 0:
+            fip_name = "Imported Bank / UPI Feed"
+            fip_acc = "Statement Sync"
+        else:
+            fip_name = "No Bank Connected Yet"
+            fip_acc = "Disconnected"
 
         nodes: list[IncomeGraphNode] = [
             IncomeGraphNode(

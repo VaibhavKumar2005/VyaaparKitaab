@@ -1,4 +1,7 @@
+import asyncio
+import inspect
 from datetime import UTC, datetime, timedelta
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -33,7 +36,12 @@ from app.services.ml_models import (
     get_store_transaction_drilldown,
     summarize_payments_made_to_others,
 )
-from app.services.ocr import MAX_IMAGE_BYTES, extract_invoice_text
+from app.services.ocr import MAX_IMAGE_BYTES, extract_invoice_text, get_ocr_capabilities
+from app.services.unified_ledger import (
+    delete_unified_source,
+    query_unified_transactions,
+    sync_personal_purchase_to_unified,
+)
 
 router = APIRouter(prefix="/purchases", tags=["purchases"])
 
@@ -96,6 +104,13 @@ async def create_purchase(
         payment_method=payload.payment_method,
     )
     db.add(purchase)
+    await db.flush()
+    await sync_personal_purchase_to_unified(
+        db,
+        purchase,
+        subcategory=payload.subcategory,
+        commit=False,
+    )
     await db.commit()
     await db.refresh(purchase)
     return purchase
@@ -256,11 +271,15 @@ async def get_spending_analytics(
     )
     recent_purchases = list(recent_res.scalars().all())
 
+    unified = await query_unified_transactions(db, user, view="customer", limit=500)
+
     return PersonalSpendingAnalytics(
         today_cost=round(today_cost, 2),
         week_cost=round(week_cost, 2),
         month_cost=round(month_cost, 2),
         total_orders=total_orders,
+        discounts_saved=unified["total_discount_saved"],
+        category_tree=unified["category_tree"],
         daily_trend=daily_trend,
         marketplace_breakdown=marketplace_breakdown,
         category_breakdown=category_breakdown,
@@ -434,17 +453,33 @@ async def parse_invoice_text(
     return ParsedInvoiceResponse(**parsed)
 
 
+def _run_extract_invoice_text(image_bytes: bytes, content_type: str | None, lang: str, handwriting: bool) -> str:
+    """Invoke `extract_invoice_text` while remaining compatible with 2-arg test monkeypatches."""
+    params = inspect.signature(extract_invoice_text).parameters
+    if "lang" in params or "handwriting" in params:
+        return extract_invoice_text(image_bytes, content_type, lang=lang, handwriting=handwriting)
+    return extract_invoice_text(image_bytes, content_type)
+
+
+@router.get("/ocr-capabilities")
+async def ocr_capabilities(user: User = Depends(get_current_user)):
+    """Report available OCR languages (offline Hindi Tesseract vs. handwritten vision)."""
+    return get_ocr_capabilities()
+
+
 @router.post("/ocr-invoice", response_model=OCRInvoiceResponse)
 async def ocr_invoice(
     file: UploadFile = File(..., description="Invoice image (JPEG, PNG, WebP, TIFF, or BMP; max 10 MB)"),
+    lang: str = Query(default="auto", description="OCR language hint: auto, eng, hin, hin+eng"),
+    handwriting: bool = Query(default=False, description="Enable handwritten Hindi/Devanagari bill mode"),
     user: User = Depends(get_current_user),
 ):
     """
-    Extracts invoice text in memory and parses common marketplace receipt fields.
+    Extracts invoice text in memory and parses English, Hindi, or handwritten receipts.
     The uploaded image and extracted text are not persisted.
     """
     image_bytes = await file.read(MAX_IMAGE_BYTES + 1)
-    extracted_text = extract_invoice_text(image_bytes, file.content_type)
+    extracted_text = await asyncio.to_thread(_run_extract_invoice_text, image_bytes, file.content_type, lang, handwriting)
     parsed = parse_marketplace_receipt_text(extracted_text)
     return OCRInvoiceResponse(extracted_text=extracted_text, **parsed)
 
@@ -452,31 +487,38 @@ async def ocr_invoice(
 @router.post("/ocr-invoice/save", response_model=OCRPurchaseResponse, status_code=status.HTTP_201_CREATED)
 async def save_ocr_purchase(
     file: UploadFile = File(..., description="Invoice image (JPEG, PNG, WebP, TIFF, or BMP; max 10 MB)"),
-    business_id: UUID | None = Form(default=None),
-    customer_id: UUID | None = Form(default=None),
-    category: str = Form(default="Shopping", max_length=100),
-    payment_method: str | None = Form(default="UPI (Google Pay)", max_length=50),
+    business_id: Annotated[UUID | None, Form()] = None,
+    customer_id: Annotated[UUID | None, Form()] = None,
+    category: Annotated[str | None, Form(max_length=100)] = None,
+    payment_method: Annotated[str | None, Form(max_length=50)] = None,
+    lang: Annotated[str, Form(max_length=20)] = "auto",
+    handwriting: Annotated[bool, Form()] = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """OCR an invoice and persist the purchase with optional business/customer links."""
     image_bytes = await file.read(MAX_IMAGE_BYTES + 1)
-    extracted_text = extract_invoice_text(image_bytes, file.content_type)
+    extracted_text = await asyncio.to_thread(_run_extract_invoice_text, image_bytes, file.content_type, lang, handwriting)
     parsed = parse_marketplace_receipt_text(extracted_text)
-    if not parsed["order_id"] or parsed["amount"] is None:
+    if not parsed["order_id"] or parsed["amount"] is None or float(parsed["amount"]) <= 0:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="OCR could not identify both an order ID and total amount; review the receipt and try again",
+            detail="OCR could not identify both an order ID and a positive total amount; review the receipt and try again",
         )
 
+    clean_cat = (category or "").strip()
+    clean_method = (payment_method or "").strip()
+    resolved_cat = clean_cat if clean_cat else (parsed.get("category") or "Shopping")
+    resolved_method = clean_method if clean_method else (parsed.get("payment_method") or "UPI")
     purchase_payload = PurchaseCreate(
         marketplace=parsed["marketplace"],
-        category=category,
+        category=resolved_cat,
+        subcategory=parsed.get("subcategory"),
         amount=parsed["amount"],
         purchased_at=parsed["purchased_at"],
         order_id=parsed["order_id"],
         items_note=parsed["items_summary"],
-        payment_method=payment_method,
+        payment_method=resolved_method,
         business_id=business_id,
         customer_id=customer_id,
     )
@@ -506,6 +548,7 @@ async def delete_purchase(
     purchase = res.scalar_one_or_none()
     if not purchase:
         raise HTTPException(status_code=404, detail="Purchase record not found")
+    await delete_unified_source(db, "personal_purchase", f"purchase:{purchase_id}")
     await db.delete(purchase)
     await db.commit()
     return {"status": "success", "deleted_id": str(purchase_id)}

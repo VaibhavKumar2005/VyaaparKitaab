@@ -9,4 +9,5 @@ This module implements the **AI/ML Demand Forecasting & Cash-Flow Analytics Engi
   - Evaluated via **MAE** (Mean Absolute Error) and **RMSE** (Root Mean Squared Error) on the chronological validation split; the winning model is retrained on 100% of the series to generate 7-day and 30-day projections.
 - **SKU-Level Stockout & Reorder Recommendations**: Computes daily unit velocity, days-to-stockout, recommended reorder quantity, and urgency tier (`CRITICAL`, `WARNING`, `HEALTHY`).
 - **Live API Endpoint**: Exposed at `GET /api/v1/ai/forecast` and rendered in the Merchant Store Dashboard (`StoreDashboard.tsx`).
+- **Google Colab Pro Training & Benchmarking Notebook**: See `AI/VyaparKitaab_Colab_Pro_Training.ipynb` for dataset inspection (`indian_kirana_transactions.csv` & `real_gpay_and_bank_statement.csv`), brand-free holdout classification Macro-F1 and measured latency evaluation, chronological time-series cross-comparison, and KMeans + PCA payee clustering.
 

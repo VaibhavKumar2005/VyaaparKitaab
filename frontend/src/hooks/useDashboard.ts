@@ -7,9 +7,19 @@ export type StoreDashboardData = {
   totalCustomers: number;
   lowStockItems: number;
   pendingInvoices: number;
+  totalDiscountsGiven?: number;
+  paymentBreakdown?: Array<{ method: string; amount: number; count: number }>;
+  categoryBreakdown?: Array<{ category: string; amount: number; count: number }>;
   topProducts: Array<{ name: string; sales: number }>;
-  recentTransactions: Array<{ invoice_number: string; total_amount: number; status: string; created_at: string }>;
-  revenueSeries: Array<{ day: string; revenue: number }>;
+  recentTransactions: Array<{
+    invoice_number: string;
+    total_amount: number;
+    discount_amount?: number;
+    payment_method?: string | null;
+    status: string;
+    created_at: string;
+  }>;
+  revenueSeries: Array<{ day?: string; date?: string; revenue: number; count?: number }>;
 };
 
 export type CustomerSummary = {
@@ -116,11 +126,7 @@ export function useStoreDashboard() {
       if (isDemoMode()) {
         return getMockStoreDashboard();
       }
-      try {
-        return await apiFetch<StoreDashboardData>('/dashboard/store');
-      } catch {
-        return getMockStoreDashboard();
-      }
+      return await apiFetch<StoreDashboardData>('/dashboard/store');
     },
   });
 }
@@ -132,11 +138,7 @@ export function useAiForecast() {
       if (isDemoMode()) {
         return FALLBACK_AI_FORECAST;
       }
-      try {
-        return await apiFetch<AiForecastData>('/ai/forecast');
-      } catch {
-        return FALLBACK_AI_FORECAST;
-      }
+      return await apiFetch<AiForecastData>('/ai/forecast');
     },
   });
 }

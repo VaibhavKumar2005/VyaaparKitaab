@@ -3,6 +3,10 @@ import {
   ArrowDownLeft,
   Building2,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  FileText,
   Lock,
   Network,
   RefreshCw,
@@ -12,6 +16,7 @@ import {
   TrendingUp,
   Upload,
   XCircle,
+  Zap,
 } from 'lucide-react';
 import {
   Bar,
@@ -28,10 +33,16 @@ import {
   useInitiateBankingConsent,
   useRevokeBankingConsent,
   useImportStatement,
+  useReconcileSuggestions,
+  useApplyReconciliation,
+  createSampleStatementPdfFile,
+  downloadSampleStatementPdf,
 } from '../hooks/useBankingIncome';
+import { isDemoMode } from '../mock/mockStore';
 import { usePaymentStream } from '../hooks/usePaymentStream';
 import { formatINR, formatINRPrecise } from '../lib/format';
 import { LiveBankFeed } from './LiveBankFeed';
+import { UpiAutoSyncModal } from './UpiAutoSyncModal';
 
 const SUPPORTED_BANKS = [
   { id: 'sbi_yono', name: 'SBI YONO', fullName: 'State Bank of India (YONO)', color: 'bg-blue-600' },
@@ -42,11 +53,13 @@ const SUPPORTED_BANKS = [
 ];
 
 export function BankingIncomeExplorer() {
-  const { data: incomeData, isLoading, refetch } = useIncomeStream();
+  const { data: incomeData, isLoading, isError, refetch } = useIncomeStream();
   const { data: graphData } = useIncomeGraph();
   const initiateConsentMutation = useInitiateBankingConsent();
   const revokeConsentMutation = useRevokeBankingConsent();
   const importStatementMutation = useImportStatement();
+  const reconcileQuery = useReconcileSuggestions();
+  const applyReconcileMutation = useApplyReconciliation();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Real-time payment stream connection with single fallback refetch on reconnect
@@ -59,38 +72,71 @@ export function BankingIncomeExplorer() {
 
   const [selectedBankId, setSelectedBankId] = useState<string>('sbi_yono');
   const [showConsentModal, setShowConsentModal] = useState<boolean>(false);
+  const [showBridgeModal, setShowBridgeModal] = useState<boolean>(false);
+  const [showSecurityDetails, setShowSecurityDetails] = useState<boolean>(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [lockedPdfFile, setLockedPdfFile] = useState<File | null>(null);
+  const [pdfPassword, setPdfPassword] = useState<string>('');
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   // 2-step AA Consent OTP Verification state
-  const [aaPhone, setAaPhone] = useState<string>('9876543210');
+  const [aaPhone, setAaPhone] = useState<string>('');
+  const [aaHandle, setAaHandle] = useState<'@onemoney' | '@finvu' | '@anumati' | 'custom'>('@onemoney');
+  const [aaCustomVua, setAaCustomVua] = useState<string>('');
   const [aaEmail, setAaEmail] = useState<string>('');
   const [aaOtpSent, setAaOtpSent] = useState<boolean>(false);
   const [aaOtpCode, setAaOtpCode] = useState<string>('');
   const [aaOtpHint, setAaOtpHint] = useState<string>('');
   const [aaError, setAaError] = useState<string | null>(null);
 
+  const runStatementImport = (file: File, password?: string) => {
+    setPdfError(null);
+    importStatementMutation.mutate(
+      password ? { file, pdfPassword: password } : file,
+      {
+        onSuccess: (res) => {
+          setLockedPdfFile(null);
+          setPdfPassword('');
+          setPdfError(null);
+          setSuccessToast(
+            `Imported ${res.imported_count} real transactions (${res.credits_count} credits, ${res.debits_count} debits) from ${res.filename}!`
+          );
+          setTimeout(() => setSuccessToast(null), 6000);
+        },
+        onError: (err) => {
+          const msg = err instanceof Error ? err.message : 'Statement import failed';
+          if (/password/i.test(msg)) {
+            setLockedPdfFile(file);
+            setPdfError(msg);
+          } else {
+            setSuccessToast(msg);
+            setTimeout(() => setSuccessToast(null), 6000);
+          }
+        },
+      },
+    );
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    importStatementMutation.mutate(file, {
-      onSuccess: (res) => {
-        setSuccessToast(
-          `Imported ${res.imported_count} real transactions (${res.credits_count} credits, ${res.debits_count} debits) from ${res.filename}!`
-        );
-        setTimeout(() => setSuccessToast(null), 6000);
-      },
-      onError: (err) => {
-        setSuccessToast(err instanceof Error ? err.message : 'Statement import failed');
-        setTimeout(() => setSuccessToast(null), 6000);
-      },
-    });
+    runStatementImport(file);
     e.target.value = '';
+  };
+
+  const handleLoadSamplePdf = () => {
+    const samplePdf = createSampleStatementPdfFile();
+    runStatementImport(samplePdf);
   };
 
   const handleSendConsentOtp = async () => {
     setAaError(null);
     setAaOtpCode('');
     const boundTarget = aaEmail.trim() || aaPhone.trim();
+    if (!boundTarget || (!boundTarget.includes('@') && boundTarget.replace(/\D/g, '').length < 10)) {
+      setAaError('Enter your 10-digit bank-linked mobile number (or email for verification)');
+      return;
+    }
     try {
       const params = new URLSearchParams({
         phone: boundTarget,
@@ -137,7 +183,14 @@ export function BankingIncomeExplorer() {
         const err = await verifyRes.json().catch(() => ({ detail: 'Invalid or expired OTP' }));
         throw new Error(err.detail || 'Invalid or expired OTP');
       }
-      handleConnectBank(selectedBankId);
+      const cleanPhone = aaPhone.trim().replace(/\D/g, '');
+      const resolvedVua =
+        aaHandle === 'custom'
+          ? aaCustomVua.trim() || undefined
+          : cleanPhone
+            ? `${cleanPhone}${aaHandle}`
+            : undefined;
+      handleConnectBank(selectedBankId, cleanPhone || aaEmail.trim(), resolvedVua);
       setAaOtpSent(false);
       setAaOtpCode('');
     } catch (err) {
@@ -169,10 +222,16 @@ export function BankingIncomeExplorer() {
     }
   }, [monthlyTrend]);
 
-  const handleConnectBank = (fipId: string) => {
+  const handleConnectBank = (fipId: string, phoneInput?: string, vuaInput?: string) => {
     setSelectedBankId(fipId);
+    const cleanPhone = (phoneInput ?? aaPhone).trim();
     initiateConsentMutation.mutate(
-      { fip_id: fipId, phone: '9876543210', data_life_months: 6 },
+      {
+        fip_id: fipId,
+        phone: cleanPhone,
+        vua: vuaInput,
+        data_life_months: 6,
+      },
       {
         onSuccess: (data) => {
           setShowConsentModal(false);
@@ -185,6 +244,9 @@ export function BankingIncomeExplorer() {
             setSuccessToast(`Successfully connected ${data.fip_name} via RBI Account Aggregator!`);
           }
           setTimeout(() => setSuccessToast(null), 6000);
+        },
+        onError: (err) => {
+          setAaError(err instanceof Error ? err.message : 'Unable to initiate bank consent');
         },
       }
     );
@@ -199,10 +261,24 @@ export function BankingIncomeExplorer() {
     });
   };
 
-  if (isLoading || !incomeData) {
+  if (isLoading) {
     return (
       <div className="rounded-xl border border-rule bg-canvas-raised p-6 text-center text-xs text-ink-soft">
-        Connecting to RBI Account Aggregator consent gateway...
+        Loading banking inflow status…
+      </div>
+    );
+  }
+  if (isError || !incomeData) {
+    return (
+      <div className="rounded-xl border border-due/30 bg-due-tint p-6 text-center text-xs text-due space-y-2">
+        <p>Could not load live banking inflows from the backend.</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="rounded-md bg-navy px-3 py-1.5 text-xs font-semibold text-white hover:bg-navy-dark"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -215,6 +291,56 @@ export function BankingIncomeExplorer() {
           <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
           <span>{successToast}</span>
         </div>
+      )}
+
+      {/* Password Prompt for Encrypted Indian Bank PDF Statements */}
+      {lockedPdfFile && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (pdfPassword.trim()) {
+              runStatementImport(lockedPdfFile, pdfPassword.trim());
+            }
+          }}
+          className="rounded-xl border border-amber-300 bg-amber-50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        >
+          <div className="space-y-0.5 text-xs">
+            <p className="font-bold text-amber-950 flex items-center gap-1.5">
+              <Lock className="h-3.5 w-3.5 text-amber-700" />
+              Unlock Encrypted PDF: {lockedPdfFile.name}
+            </p>
+            <p className="text-amber-900">
+              {pdfError || 'Enter your bank PDF password (e.g. PAN / DOB / Customer ID). Used in-memory only and never stored.'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <input
+              type="password"
+              value={pdfPassword}
+              onChange={(e) => setPdfPassword(e.target.value)}
+              placeholder="PDF Password"
+              className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs outline-none focus:border-navy"
+            />
+            <button
+              type="submit"
+              disabled={!pdfPassword.trim() || importStatementMutation.isPending}
+              className="rounded-md bg-navy px-3 py-1.5 text-xs font-semibold text-white hover:bg-navy-dark disabled:opacity-50"
+            >
+              {importStatementMutation.isPending ? 'Unlocking…' : 'Unlock & Import'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLockedPdfFile(null);
+                setPdfPassword('');
+                setPdfError(null);
+              }}
+              className="rounded-md border border-amber-300 px-2.5 py-1.5 text-xs text-amber-900 hover:bg-amber-100"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
       )}
 
       {/* Main Header Strip */}
@@ -244,7 +370,7 @@ export function BankingIncomeExplorer() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.json"
+            accept=".pdf,.csv,.tsv,.txt,.json,.html,.htm,application/pdf,text/html"
             onChange={handleFileChange}
             className="hidden"
           />
@@ -253,10 +379,38 @@ export function BankingIncomeExplorer() {
             onClick={() => fileInputRef.current?.click()}
             disabled={importStatementMutation.isPending}
             className="inline-flex items-center gap-1.5 rounded-lg border border-navy bg-canvas px-3 py-1.5 text-xs font-bold text-navy hover:bg-navy-tint transition-colors"
-            title="Upload real Bank, Google Pay, PhonePe, or Paytm CSV/JSON statement"
+            title="Upload real Bank, Google Pay (CSV/JSON/Takeout HTML), PhonePe, or Paytm PDF statements"
           >
             <Upload className="h-3.5 w-3.5" />
-            {importStatementMutation.isPending ? 'Importing…' : 'Import Statement (CSV/JSON)'}
+            {importStatementMutation.isPending ? 'Importing…' : 'Upload Statement (PDF / CSV / GPay HTML)'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowBridgeModal(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-950 hover:bg-amber-100 transition-colors"
+            title="Zero-credential Android Notification / SMS / Gmail Apps Script sync for GPay & Paytm"
+          >
+            <Zap className="h-3.5 w-3.5 text-amber-600" />
+            Auto-Sync GPay / Paytm
+          </button>
+          <button
+            type="button"
+            onClick={handleLoadSamplePdf}
+            disabled={importStatementMutation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600/40 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-900 hover:bg-emerald-100 transition-colors"
+            title="Directly parse and load realistic 12-row Indian UPI & Bank PDF statement without needing a mobile app"
+          >
+            <FileText className="h-3.5 w-3.5 text-emerald-700" />
+            Load Realistic PDF
+          </button>
+          <button
+            type="button"
+            onClick={downloadSampleStatementPdf}
+            className="inline-flex items-center gap-1 rounded-lg border border-rule bg-canvas px-2.5 py-1.5 text-xs font-semibold text-ink-soft hover:text-ink hover:bg-canvas-sunk transition-colors"
+            title="Download realistic sample PDF statement to your device"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Sample PDF
           </button>
           <button
             type="button"
@@ -289,38 +443,50 @@ export function BankingIncomeExplorer() {
         </div>
       </div>
 
-      {/* Security Architecture Box (Why it's safe without storing account credentials) */}
-      <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 space-y-2">
-        <div className="flex items-center gap-2 text-xs font-bold text-blue-950">
-          <Shield className="h-4 w-4 text-blue-700 shrink-0" />
-          <span>How It Works Safely: The RBI Account Aggregator (AA) Framework</span>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4 text-xs text-blue-900 pt-1">
-          <div className="rounded-lg bg-white/70 p-2.5 border border-blue-100 shadow-2xs">
-            <span className="font-bold block text-blue-950">1. Zero Account Credentials</span>
-            <span className="text-[11px] text-blue-800">
-              You never enter your account number, netbanking password, or MPIN on VyaparKitaab.
-            </span>
+      {/* Collapsible Security Architecture Strip (Collapsed by default to prevent UI stacking) */}
+      <div className="rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-2.5">
+        <button
+          type="button"
+          onClick={() => setShowSecurityDetails((prev) => !prev)}
+          className="w-full flex items-center justify-between text-left text-xs font-bold text-blue-950"
+        >
+          <span className="flex items-center gap-2">
+            <Shield className="h-4 w-4 text-blue-700 shrink-0" />
+            <span>RBI Account Aggregator (AA) Security Guarantee: Zero Credentials • 100% Read-Only • 1-Click Revocable</span>
+          </span>
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700">
+            {showSecurityDetails ? 'Hide details' : 'How it works'}
+            {showSecurityDetails ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </span>
+        </button>
+        {showSecurityDetails && (
+          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4 text-xs text-blue-900 pt-3 mt-2 border-t border-blue-200/60">
+            <div className="rounded-lg bg-white/70 p-2.5 border border-blue-100 shadow-2xs">
+              <span className="font-bold block text-blue-950">1. Zero Account Credentials</span>
+              <span className="text-[11px] text-blue-800">
+                You never enter your account number, netbanking password, or MPIN on VyaparKitaab.
+              </span>
+            </div>
+            <div className="rounded-lg bg-white/70 p-2.5 border border-blue-100 shadow-2xs">
+              <span className="font-bold block text-blue-950">2. In-App Mobile Consent</span>
+              <span className="text-[11px] text-blue-800">
+                Approval happens securely inside your own bank app (SBI YONO / HDFC / PhonePe AA).
+              </span>
+            </div>
+            <div className="rounded-lg bg-white/70 p-2.5 border border-blue-100 shadow-2xs">
+              <span className="font-bold block text-blue-950">3. 100% Read-Only Inflows</span>
+              <span className="text-[11px] text-blue-800">
+                Only incoming <code className="font-mono text-emerald-800 font-bold">CREDIT</code> records are streamed; debits are impossible.
+              </span>
+            </div>
+            <div className="rounded-lg bg-white/70 p-2.5 border border-blue-100 shadow-2xs">
+              <span className="font-bold block text-blue-950">4. 1-Click Revocable</span>
+              <span className="text-[11px] text-blue-800">
+                Full control under the DPDP Act. Revoking consent cuts off data access immediately.
+              </span>
+            </div>
           </div>
-          <div className="rounded-lg bg-white/70 p-2.5 border border-blue-100 shadow-2xs">
-            <span className="font-bold block text-blue-950">2. In-App Mobile Consent</span>
-            <span className="text-[11px] text-blue-800">
-              Approval happens securely inside your own bank app (SBI YONO / HDFC / PhonePe AA).
-            </span>
-          </div>
-          <div className="rounded-lg bg-white/70 p-2.5 border border-blue-100 shadow-2xs">
-            <span className="font-bold block text-blue-950">3. 100% Read-Only Inflows</span>
-            <span className="text-[11px] text-blue-800">
-              Only incoming <code className="font-mono text-emerald-800 font-bold">CREDIT</code> records are streamed; debits are impossible.
-            </span>
-          </div>
-          <div className="rounded-lg bg-white/70 p-2.5 border border-blue-100 shadow-2xs">
-            <span className="font-bold block text-blue-950">4. 1-Click Revocable</span>
-            <span className="text-[11px] text-blue-800">
-              Full control under the DPDP Act. Revoking consent cuts off data access immediately.
-            </span>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Connected Bank Switcher Bar */}
@@ -335,7 +501,11 @@ export function BankingIncomeExplorer() {
               <button
                 key={bank.id}
                 type="button"
-                onClick={() => handleConnectBank(bank.id)}
+                onClick={() => {
+                  setSelectedBankId(bank.id);
+                  setAaError(null);
+                  setShowConsentModal(true);
+                }}
                 className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all border ${
                   isActive
                     ? 'bg-navy text-white border-navy shadow-sm'
@@ -354,6 +524,26 @@ export function BankingIncomeExplorer() {
           })}
         </div>
       </div>
+
+      {!incomeData.is_connected && (
+        <div className="rounded-xl border-2 border-dashed border-navy/30 bg-navy-tint/40 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="text-sm font-bold text-ink">No Bank Account or Statement Linked Yet</h3>
+            <p className="text-xs text-ink-soft">
+              Enter your mobile number via <strong>Connect Banking App</strong> (RBI AA), enable{' '}
+              <strong>Auto-Sync GPay / Paytm</strong>, or upload your real Bank CSV / Google Takeout{' '}
+              <code>My Activity.html</code> above to see real transactions.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowConsentModal(true)}
+            className="shrink-0 rounded-lg bg-navy px-4 py-2 text-xs font-bold text-white hover:bg-navy-dark"
+          >
+            Link Mobile Number via AA
+          </button>
+        </div>
+      )}
 
       {/* KPI Metrics Strip */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -384,11 +574,11 @@ export function BankingIncomeExplorer() {
             Connected Bank Account
           </p>
           <p className="mt-1 text-sm font-bold text-ink truncate">
-            {activeConsent?.fip_name || 'State Bank of India'}
+            {activeConsent?.fip_name || (incomeData.is_connected ? 'Imported Bank / UPI Feed' : 'Not Connected')}
           </p>
           <p className="mt-0.5 text-[11px] text-ink-soft flex items-center gap-1 font-mono">
             <Lock className="h-3 w-3 text-emerald-600" />
-            Masked: {activeConsent?.masked_acc || 'XXXX-XXXX-4821'}
+            {activeConsent?.masked_acc ? `Masked: ${activeConsent.masked_acc}` : incomeData.is_connected ? 'Account Masked' : 'No account linked'}
           </p>
         </div>
 
@@ -404,6 +594,65 @@ export function BankingIncomeExplorer() {
           </p>
         </div>
       </div>
+
+      {/* 1-Click Bank Credit <-> Open Invoice Reconciliation */}
+      {!isDemoMode() && (reconcileQuery.data?.suggestions?.length ?? 0) > 0 && (
+        <div className="rounded-xl border border-emerald-300 bg-emerald-50/50 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-emerald-950">
+                Smart Invoice Reconciliation ({reconcileQuery.data?.count} Match
+                {reconcileQuery.data?.count === 1 ? '' : 'es'} Found)
+              </h3>
+              <p className="text-[11px] text-emerald-900">
+                Real incoming UPI/Bank credits below match unpaid store bills. Click to settle automatically.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {reconcileQuery.data?.suggestions.map((s) => (
+              <div
+                key={`${s.txn_id}-${s.invoice_id}`}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-white px-3.5 py-2.5 text-xs"
+              >
+                <div className="space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold text-emerald-700 num">+{formatINRPrecise(s.txn_amount)}</span>
+                    <span className="font-semibold text-ink">{s.counterparty}</span>
+                    <span className="rounded bg-canvas-sunk px-1.5 py-0.5 text-[10px] font-mono text-ink-soft">
+                      {s.txn_app} · {s.txn_date}
+                    </span>
+                    <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                      Matches {s.invoice_number} ({s.customer_name})
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-ink-soft">{s.match_reason}</p>
+                </div>
+                <button
+                  type="button"
+                  disabled={applyReconcileMutation.isPending}
+                  onClick={() => {
+                    applyReconcileMutation.mutate(
+                      { txn_id: s.txn_id, invoice_id: s.invoice_id },
+                      {
+                        onSuccess: (res) => {
+                          setSuccessToast(
+                            `Reconciled ${res.invoice_number} (${res.invoice_status}) — Paid ${formatINRPrecise(res.paid_amount)}`,
+                          );
+                          setTimeout(() => setSuccessToast(null), 6000);
+                        },
+                      },
+                    );
+                  }}
+                  className="shrink-0 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  Mark Invoice Paid
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Visual Inward Money Flow Graph (Bank App -> AA Tunnel -> Income Stream -> Categories) */}
       <div className="rounded-xl border border-rule bg-canvas p-4 space-y-3">
@@ -652,7 +901,7 @@ export function BankingIncomeExplorer() {
             </div>
 
             <p className="text-xs text-ink-soft leading-relaxed">
-              Select your FIP bank below and verify your consent via 6-digit OTP (delivered to your Gmail SMTP inbox).
+              Select your FIP bank below and verify your consent via 6-digit OTP.
               <strong> VyaparKitaab never asks for or stores your bank account number or password.</strong>
             </p>
 
@@ -676,7 +925,7 @@ export function BankingIncomeExplorer() {
 
             <div className="space-y-2.5 pt-1">
               <div>
-                <label className="text-xs font-semibold text-ink">Linked Mobile Number</label>
+                <label className="text-xs font-semibold text-ink">Linked Mobile Number (+91)</label>
                 <input
                   type="tel"
                   maxLength={10}
@@ -687,7 +936,29 @@ export function BankingIncomeExplorer() {
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-ink">Email for Real OTP Verification (Gmail SMTP)</label>
+                <label className="text-xs font-semibold text-ink">Account Aggregator (AA) Handle</label>
+                <select
+                  value={aaHandle}
+                  onChange={(e) => setAaHandle(e.target.value as '@onemoney' | '@finvu' | '@anumati' | 'custom')}
+                  className="mt-1 w-full rounded border border-rule bg-canvas px-3 py-2 text-xs"
+                >
+                  <option value="@onemoney">@onemoney (OneMoney / Setu Sandbox)</option>
+                  <option value="@finvu">@finvu (Finvu AA)</option>
+                  <option value="@anumati">@anumati (Perfios Anumati)</option>
+                  <option value="custom">Custom AA VUA Handle</option>
+                </select>
+                {aaHandle === 'custom' && (
+                  <input
+                    type="text"
+                    value={aaCustomVua}
+                    onChange={(e) => setAaCustomVua(e.target.value)}
+                    placeholder="9876543210@phonepe"
+                    className="mt-1.5 w-full rounded border border-rule bg-canvas px-3 py-2 text-xs font-mono"
+                  />
+                )}
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-ink">Email for OTP Verification (Optional)</label>
                 <input
                   type="email"
                   value={aaEmail}
@@ -740,6 +1011,15 @@ export function BankingIncomeExplorer() {
           </div>
         </div>
       )}
+      <UpiAutoSyncModal
+        open={showBridgeModal}
+        onClose={() => setShowBridgeModal(false)}
+        onSynced={(summary) => {
+          setSuccessToast(summary);
+          setTimeout(() => setSuccessToast(null), 6000);
+          void refetch();
+        }}
+      />
     </section>
   );
 }

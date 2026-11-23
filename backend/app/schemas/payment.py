@@ -23,6 +23,8 @@ class PaymentVerifyRequest(BaseModel):
     order_id: str
     payment_id: str
     signature: str
+    otp_code: str | None = None
+    require_otp: bool = False
 
 
 class PaymentInfoResponse(BaseModel):

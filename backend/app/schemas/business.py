@@ -9,7 +9,16 @@ class BusinessCreate(BaseModel):
     gstin: str | None = None
     address: str | None = None
     phone: str | None = None
+    upi_vpa: str | None = None
     owner_id: UUID | None = None
+
+
+class BusinessUpdate(BaseModel):
+    name: str | None = None
+    gstin: str | None = None
+    address: str | None = None
+    phone: str | None = None
+    upi_vpa: str | None = None
 
 
 class BusinessRead(BusinessCreate):

@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = Field(default="")
     SMTP_FROM_EMAIL: str = Field(default="")
 
+    # OCR & Handwritten Hindi Receipt Configuration
+    # Offline Tesseract uses "hin+eng" (when tesseract-ocr-hin is installed).
+    # Optional GEMINI_API_KEY enables Gemini Vision for handwritten Hindi kacha parchas.
+    OCR_DEFAULT_LANG: str = Field(default="auto")
+    GEMINI_API_KEY: str = Field(default="")
+    OCR_GEMINI_MODEL: str = Field(default="gemini-2.5-flash")
+
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
     def parse_allowed_origins(cls, value):

@@ -17,7 +17,7 @@ export function LoginPage() {
   const [activeTab, setActiveTab] = useState<'BUSINESS' | 'CUSTOMER'>('BUSINESS');
 
   // Customer OTP state
-  const [customerPhone, setCustomerPhone] = useState('9876543210');
+  const [customerPhone, setCustomerPhone] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [otpValue, setOtpValue] = useState('');
@@ -84,13 +84,13 @@ export function LoginPage() {
         message?: string;
       };
       if (data.channel === 'email') {
-        setOtpHint(`Sent via Gmail SMTP to ${boundTarget}`);
+        setOtpHint(`OTP sent to ${boundTarget}`);
       } else if (data.channel === 'sms') {
         setOtpHint(`SMS OTP sent to +91 ${boundTarget}`);
       } else if (data.dev_otp) {
-        setOtpHint(`Generated DB Code (set SMTP_USER & SMTP_PASSWORD in .env for email delivery): ${data.dev_otp}`);
+        setOtpHint(`Verification Code (Sandbox Mode): ${data.dev_otp}`);
       } else {
-        setOtpHint('Enter 6-digit verification code');
+        setOtpHint(`Enter the 6-digit verification code sent to ${boundTarget}`);
       }
       setOtpSent(true);
     } catch (err) {
@@ -285,7 +285,7 @@ export function LoginPage() {
                   <span>Or Email for Real OTP Delivery (Gmail SMTP)</span>
                 </label>
                 <span className="text-[11px] font-semibold text-ink-soft">
-                  {smtpConfigured ? 'SMTP Active' : 'Configure in .env'}
+                  {smtpConfigured ? 'Email OTP Active' : 'Instant OTP'}
                 </span>
               </div>
               <input
@@ -314,7 +314,9 @@ export function LoginPage() {
               <div className="space-y-3 rounded-md border border-navy/20 bg-navy-tint p-3.5">
                 <div className="flex flex-col gap-1 text-xs">
                   <span className="font-semibold text-ink">
-                    Enter 6-digit OTP to verify +91 {customerPhone}:
+                    {customerEmail.trim()
+                      ? `Enter 6-digit OTP sent to ${customerEmail.trim()}:`
+                      : `Enter 6-digit OTP to verify +91 ${customerPhone}:`}
                   </span>
                   {otpHint && (
                     <span className="text-[11px] font-mono font-bold text-navy">{otpHint}</span>
