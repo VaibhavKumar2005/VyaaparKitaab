@@ -16,6 +16,9 @@ const CustomerList = lazy(() =>
 const ProductList = lazy(() =>
   import('./pages/ProductList').then((m) => ({ default: m.ProductList }))
 );
+const SupplierList = lazy(() =>
+  import('./pages/SupplierList').then((m) => ({ default: m.SupplierList }))
+);
 const InvoiceList = lazy(() =>
   import('./pages/InvoiceList').then((m) => ({ default: m.InvoiceList }))
 );
@@ -52,6 +55,7 @@ export default function App() {
           <Route path="dashboard" element={<StoreDashboard />} />
           <Route path="customers" element={<CustomerList />} />
           <Route path="products" element={<ProductList />} />
+          <Route path="suppliers" element={<SupplierList />} />
           <Route path="invoices" element={<InvoiceList />} />
           <Route path="invoices/new" element={<InvoiceForm />} />
           <Route path="invoices/:id" element={<InvoiceDetail />} />

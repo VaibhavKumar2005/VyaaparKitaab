@@ -694,3 +694,297 @@ async def test_ocr_capabilities_and_handwritten_hindi_vision_flow(monkeypatch):
     finally:
         settings.GEMINI_API_KEY = orig_key
         app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.anyio
+async def test_suppliers_crud_and_store_owner_ocr_save(monkeypatch):
+    """Verifies Suppliers full CRUD with multi-tenant isolation and Store Owner saving OCR bill to business ledger."""
+    await engine.dispose()
+    owner_a = User(
+        id=uuid4(),
+        email=f"supa_{uuid4().hex[:6]}@shop.in",
+        hashed_password="test_hash_value_123",
+        role="STORE_OWNER",
+    )
+    owner_b = User(
+        id=uuid4(),
+        email=f"supb_{uuid4().hex[:6]}@shop.in",
+        hashed_password="test_hash_value_123",
+        role="STORE_OWNER",
+    )
+    async with SessionLocal() as db:
+        db.add_all([owner_a, owner_b])
+        await db.flush()
+        biz_a = Business(name="Verma Kirana", owner_id=owner_a.id)
+        db.add(biz_a)
+        await db.commit()
+        await db.refresh(biz_a)
+
+    app.dependency_overrides[get_current_user] = lambda: owner_a
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            created = await client.post(
+                "/api/v1/suppliers",
+                json={
+                    "name": "Metro Cash & Carry",
+                    "phone": "9811002233",
+                    "email": "orders@metro.in",
+                    "business_id": str(biz_a.id),
+                },
+            )
+            assert created.status_code == 200
+            sup_id = created.json()["id"]
+
+            listed = await client.get("/api/v1/suppliers")
+            assert listed.status_code == 200
+            assert any(s["id"] == sup_id and s["name"] == "Metro Cash & Carry" for s in listed.json())
+
+            updated = await client.put(
+                f"/api/v1/suppliers/{sup_id}",
+                json={"name": "Metro Wholesale India", "phone": "9899887766"},
+            )
+            assert updated.status_code == 200
+            assert updated.json()["name"] == "Metro Wholesale India"
+
+            # Store owner saves a scanned Hindi supplier bill linked to business_id
+            bill_no = f"SUP-{uuid4().hex[:5].upper()}7"
+            monkeypatch.setattr(
+                "app.routers.purchases.extract_invoice_text",
+                lambda _bytes, _ct: f"Ganesh Distributors\nBill No: {bill_no}\nTotal: ₹4,250.00\nCash",
+            )
+            ocr_saved = await client.post(
+                "/api/v1/purchases/ocr-invoice/save",
+                data={"business_id": str(biz_a.id)},
+                files={"file": ("supplier_bill.png", b"img-bytes", "image/png")},
+            )
+            assert ocr_saved.status_code == 201
+            assert ocr_saved.json()["business_id"] == str(biz_a.id)
+            assert ocr_saved.json()["amount"] == 4250.0
+
+            # Cross-tenant protection on Supplier PUT/DELETE
+            app.dependency_overrides[get_current_user] = lambda: owner_b
+            assert (await client.put(f"/api/v1/suppliers/{sup_id}", json={"name": "Hijack"})).status_code == 404
+            assert (await client.delete(f"/api/v1/suppliers/{sup_id}")).status_code == 404
+
+            # Owner A deletes their supplier cleanly
+            app.dependency_overrides[get_current_user] = lambda: owner_a
+            deleted = await client.delete(f"/api/v1/suppliers/{sup_id}")
+            assert deleted.status_code == 200
+            assert deleted.json()["deleted"] is True
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.anyio
+async def test_phase1_security_hardening_audit_fixes(monkeypatch):
+    """
+    Verifies all Phase 1 production & banking-readiness audit fixes:
+    1. Fail-closed production Settings validation (ENCRYPTION_KEY, wildcard CORS, sandbox OTP, gateway secrets).
+    2. /payments/verify rejects failed gateway lookups, non-captured status, order mismatch, and amount tampering.
+    3. /banking/webhook enforces HMAC-SHA256 signature verification via SETU_AA_WEBHOOK_SECRET.
+    4. /banking/consent/authorize blocks self-approval in live AA mode (403).
+    5. /auth/register blocks anonymous STAFF role escalation (400).
+    6. OTP uses HMAC-SHA256 pepper and burns the OTP after 5 failed guesses.
+    """
+    import hashlib
+    import hmac
+    import json
+
+    from app.cores.config import Settings, settings
+    from app.models.transaction import Invoice
+    from app.services.otp import check_otp_code, store_otp
+    from app.services.payment import payment_service
+
+    # 1. Fail-closed production Settings checks
+    base_prod = {
+        "ENV": "production",
+        "SECRET_KEY": "a" * 40,
+        "ENCRYPTION_KEY": "b" * 40,
+        "ALLOWED_ORIGINS": ["https://app.vyaaparkitaab.in"],
+        "OTP_PROVIDER": "smtp_email",
+        "PAYMENT_GATEWAY": "razorpay",
+        "PAYMENT_KEY_ID": "rzp_test_placeholder_id",
+        "PAYMENT_KEY_SECRET": "sec_123",
+        "PAYMENT_WEBHOOK_SECRET": "whsec_123",
+    }
+    Settings(**base_prod).validate_production_security()
+
+    with pytest.raises(ValueError, match="ENCRYPTION_KEY"):
+        Settings(**{**base_prod, "ENCRYPTION_KEY": ""}).validate_production_security()
+    with pytest.raises(ValueError, match="Wildcard"):
+        Settings(**{**base_prod, "ALLOWED_ORIGINS": ["*"]}).validate_production_security()
+    with pytest.raises(ValueError, match="OTP_PROVIDER"):
+        Settings(**{**base_prod, "OTP_PROVIDER": "sandbox"}).validate_production_security()
+    with pytest.raises(ValueError, match="PAYMENT_KEY_SECRET"):
+        Settings(**{**base_prod, "PAYMENT_KEY_SECRET": ""}).validate_production_security()
+
+    await engine.dispose()
+    merchant = User(
+        id=uuid4(),
+        email=f"sec_{uuid4().hex[:6]}@shop.in",
+        hashed_password="test_hash_value_123",
+        role="STORE_OWNER",
+    )
+    inv_id = uuid4()
+    async with SessionLocal() as db:
+        db.add(merchant)
+        await db.flush()
+        biz = Business(name="Secure Kirana", owner_id=merchant.id)
+        db.add(biz)
+        await db.flush()
+        inv = Invoice(
+            id=inv_id,
+            invoice_number=f"INV-SEC-{uuid4().hex[:5]}",
+            business_id=biz.id,
+            type="SALE",
+            status="CONFIRMED",
+            subtotal=1000.0,
+            tax_amount=0.0,
+            total_amount=1000.0,
+            paid_amount=0.0,
+            pending_order_id="order_live_999",
+            pending_order_amount=1000.0,
+        )
+        db.add(inv)
+        await db.commit()
+
+    orig = (
+        settings.PAYMENT_GATEWAY,
+        settings.BANK_DATA_PROVIDER,
+        settings.SETU_AA_WEBHOOK_SECRET,
+        payment_service.key_secret,
+    )
+    app.dependency_overrides[get_current_user] = lambda: merchant
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            # 2. Live gateway /payments/verify must fail closed on lookup error, failed status, and tampered amount
+            settings.PAYMENT_GATEWAY = "razorpay"
+            payment_service.key_secret = "rzp_test_sec_key"
+            valid_sig = hmac.new(b"rzp_test_sec_key", b"order_live_999|pay_live_999", hashlib.sha256).hexdigest()
+
+            async def _raise_gw(_pid: str):
+                raise RuntimeError("Gateway unreachable")
+
+            monkeypatch.setattr(payment_service, "get_payment_info", _raise_gw)
+            r_err = await client.post(
+                "/api/v1/payments/verify",
+                json={
+                    "order_id": "order_live_999",
+                    "payment_id": "pay_live_999",
+                    "signature": valid_sig,
+                    "invoice_id": str(inv_id),
+                },
+            )
+            assert r_err.status_code == 502
+
+            async def _failed_status(_pid: str):
+                return {"payment_id": _pid, "order_id": "order_live_999", "amount": 1000.0, "currency": "INR", "status": "failed"}
+
+            monkeypatch.setattr(payment_service, "get_payment_info", _failed_status)
+            r_fail = await client.post(
+                "/api/v1/payments/verify",
+                json={
+                    "order_id": "order_live_999",
+                    "payment_id": "pay_live_999",
+                    "signature": valid_sig,
+                    "invoice_id": str(inv_id),
+                },
+            )
+            assert r_fail.status_code == 400
+
+            async def _tampered_amt(_pid: str):
+                return {"payment_id": _pid, "order_id": "order_live_999", "amount": 10.0, "currency": "INR", "status": "captured"}
+
+            monkeypatch.setattr(payment_service, "get_payment_info", _tampered_amt)
+            r_amt = await client.post(
+                "/api/v1/payments/verify",
+                json={
+                    "order_id": "order_live_999",
+                    "payment_id": "pay_live_999",
+                    "signature": valid_sig,
+                    "invoice_id": str(inv_id),
+                },
+            )
+            assert r_amt.status_code == 400
+
+            async def _captured_ok(_pid: str):
+                return {
+                    "payment_id": _pid,
+                    "order_id": "order_live_999",
+                    "amount": 1000.0,
+                    "currency": "INR",
+                    "status": "captured",
+                    "method": "upi",
+                    "vpa": "buyer@oksbi",
+                    "raw": {"card": {"last4": "4242"}},
+                }
+
+            monkeypatch.setattr(payment_service, "get_payment_info", _captured_ok)
+            r_ok = await client.post(
+                "/api/v1/payments/verify",
+                json={
+                    "order_id": "order_live_999",
+                    "payment_id": "pay_live_999",
+                    "signature": valid_sig,
+                    "invoice_id": str(inv_id),
+                },
+            )
+            assert r_ok.status_code == 200
+            assert r_ok.json()["invoice_status"] == "PAID"
+
+            # 3. /banking/webhook enforces HMAC-SHA256 signature when SETU_AA_WEBHOOK_SECRET is set
+            settings.SETU_AA_WEBHOOK_SECRET = "setu_wh_secret_999"
+            wh_body = json.dumps({"consentId": "nonexistent_c1", "status": "ACTIVE"}).encode("utf-8")
+            assert (await client.post("/api/v1/banking/webhook", content=wh_body)).status_code == 401
+            assert (
+                await client.post(
+                    "/api/v1/banking/webhook",
+                    content=wh_body,
+                    headers={"X-Setu-Signature": "forged_sig"},
+                )
+            ).status_code == 401
+            good_wh_sig = hmac.new(b"setu_wh_secret_999", wh_body, hashlib.sha256).hexdigest()
+            r_wh = await client.post(
+                "/api/v1/banking/webhook",
+                content=wh_body,
+                headers={"X-Setu-Signature": good_wh_sig},
+            )
+            assert r_wh.status_code == 200
+
+            # 4. /banking/consent/authorize blocks self-approval in setu_aa mode
+            settings.BANK_DATA_PROVIDER = "setu_aa"
+            r_self = await client.post(
+                "/api/v1/banking/consent/authorize",
+                json={"consent_id": "c_123", "approve": True, "fip_id": "sbi_yono"},
+            )
+            assert r_self.status_code == 403
+
+            # 5. /auth/register rejects client-supplied STAFF role
+            r_staff = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": f"staff_{uuid4().hex[:6]}@shop.in",
+                    "password": "StrongPassword123!",
+                    "role": "STAFF",
+                },
+            )
+            assert r_staff.status_code == 400
+
+        # 6. OTP HMAC pepper + 5-strike brute-force burn
+        async with SessionLocal() as db:
+            phone = f"99{uuid4().int % 100000000:08d}"
+            rec = await store_otp(db, phone, "TRANSACTION", "842913")
+            # Hash must NOT equal unsalted sha256("842913")
+            assert rec.otp_hash != hashlib.sha256(b"842913").hexdigest()
+            for _ in range(5):
+                assert await check_otp_code(db, phone, "000000", purpose="TRANSACTION") is False
+            # 6th attempt with the REAL OTP must fail because the OTP was burned on the 5th strike
+            assert await check_otp_code(db, phone, "842913", purpose="TRANSACTION") is False
+    finally:
+        (
+            settings.PAYMENT_GATEWAY,
+            settings.BANK_DATA_PROVIDER,
+            settings.SETU_AA_WEBHOOK_SECRET,
+            payment_service.key_secret,
+        ) = orig
+        app.dependency_overrides.pop(get_current_user, None)

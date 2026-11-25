@@ -1,4 +1,5 @@
 import hashlib
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -25,6 +26,7 @@ from app.services.auth import (
 from app.services.otp import check_otp_code, dispatch_otp
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/register", response_model=TokenResponse)
@@ -33,7 +35,12 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    allowed_roles = {"STORE_OWNER", "CUSTOMER", "STAFF"}
+    allowed_roles = {"STORE_OWNER", "CUSTOMER"}
+    if payload.role and payload.role not in allowed_roles:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Public registration supports STORE_OWNER or CUSTOMER only",
+        )
     role = payload.role if payload.role in allowed_roles else "STORE_OWNER"
 
     user = User(
@@ -107,10 +114,11 @@ async def send_otp(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
-    except Exception as exc:
+    except (OSError, RuntimeError) as exc:
+        logger.warning("OTP delivery provider error (%s)", type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to send OTP via SMTP/Gateway: {exc}",
+            detail="OTP delivery service temporarily unavailable",
         ) from exc
 
 

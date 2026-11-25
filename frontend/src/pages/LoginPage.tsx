@@ -140,7 +140,7 @@ export function LoginPage() {
           }`}
         >
           <Store className="h-4 w-4" />
-          <span>Business (दुकानदार / Merchant)</span>
+          <span>Business / Merchant</span>
         </button>
 
         <button
@@ -153,7 +153,7 @@ export function LoginPage() {
           }`}
         >
           <Smartphone className="h-4 w-4" />
-          <span>Customer (ग्राहक पासबुक)</span>
+          <span>Customer Passbook</span>
         </button>
       </div>
 
@@ -258,7 +258,7 @@ export function LoginPage() {
 
           <form onSubmit={handleVerifyCustomerOtp} className="space-y-4">
             <div>
-              <label htmlFor="phone" className="text-sm font-medium">Customer Mobile Number (मोबाइल नंबर)</label>
+              <label htmlFor="phone" className="text-sm font-medium">Customer Mobile Number</label>
               <div className="mt-1.5 flex gap-2">
                 <span className="inline-flex items-center rounded-md border border-rule bg-canvas-sunk px-3 text-sm text-ink-soft">
                   +91
@@ -308,7 +308,7 @@ export function LoginPage() {
                 onClick={handleSendOtp}
                 className="w-full rounded-md bg-navy px-4 py-2.5 font-semibold text-white hover:bg-navy-dark disabled:opacity-60 text-sm flex items-center justify-center gap-1.5"
               >
-                <span>{isSendingOtp ? 'Dispatching OTP…' : 'Send 6-Digit OTP (ओटीपी भेजें)'}</span>
+                <span>{isSendingOtp ? 'Dispatching OTP…' : 'Send 6-Digit OTP'}</span>
               </button>
             ) : (
               <div className="space-y-3 rounded-md border border-navy/20 bg-navy-tint p-3.5">

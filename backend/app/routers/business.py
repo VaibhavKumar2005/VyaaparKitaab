@@ -19,6 +19,7 @@ from app.schemas.business import (
     ProductUpdate,
     SupplierCreate,
     SupplierRead,
+    SupplierUpdate,
 )
 from app.services.auth import get_current_user
 
@@ -189,3 +190,43 @@ async def create_supplier(payload: SupplierCreate, db: AsyncSession = Depends(ge
 async def list_suppliers(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     result = await db.execute(select(Supplier).join(Business).where(Business.owner_id == user.id))
     return list(result.scalars().all())
+
+
+@router.put("/suppliers/{supplier_id}", response_model=SupplierRead)
+async def update_supplier(
+    supplier_id: UUID,
+    payload: SupplierUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Supplier).join(Business).where(Supplier.id == supplier_id, Business.owner_id == user.id)
+    )
+    supplier = result.scalar_one_or_none()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(supplier, field, value)
+
+    await db.commit()
+    await db.refresh(supplier)
+    return supplier
+
+
+@router.delete("/suppliers/{supplier_id}")
+async def delete_supplier(
+    supplier_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Supplier).join(Business).where(Supplier.id == supplier_id, Business.owner_id == user.id)
+    )
+    supplier = result.scalar_one_or_none()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+
+    await db.delete(supplier)
+    await db.commit()
+    return {"deleted": True, "id": str(supplier_id)}

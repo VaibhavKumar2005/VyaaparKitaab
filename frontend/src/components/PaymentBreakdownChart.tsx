@@ -45,7 +45,7 @@ export function PaymentBreakdownChart() {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold text-ink">UPI & Gateway Collections (डिजिटल भुगतान सारांश)</h2>
+            <h2 className="text-lg font-bold text-ink">UPI & Gateway Collections</h2>
             <span className="rounded bg-navy-tint px-2 py-0.5 text-[10px] font-bold text-primary flex items-center gap-1">
               <Zap className="h-3 w-3" /> Real-time Ingestion
             </span>

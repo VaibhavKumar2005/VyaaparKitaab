@@ -10,6 +10,23 @@ locals {
   name_prefix    = lower(var.project_name)
   resource_group = "rg-${local.name_prefix}-${var.environment}"
   suffix         = random_string.suffix.result
+  app_env        = var.environment == "prod" ? "production" : var.app_env
+  allowed_origins = join(
+    ",",
+    distinct(
+      compact(
+        concat(
+          ["https://${azurerm_static_web_app.frontend.default_host_name}"],
+          var.extra_allowed_origins,
+        )
+      )
+    )
+  )
+  effective_backend_image = (
+    var.backend_image != ""
+    ? var.backend_image
+    : "${azurerm_container_registry.main.login_server}/vyaaparkitaab-backend:latest"
+  )
 }
 
 resource "azurerm_resource_group" "main" {
@@ -57,7 +74,7 @@ resource "azurerm_container_registry" "main" {
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   sku                 = "Basic"
-  admin_enabled       = true
+  admin_enabled       = false
 }
 
 resource "azurerm_key_vault" "main" {
@@ -71,22 +88,70 @@ resource "azurerm_key_vault" "main" {
   rbac_authorization_enabled = true
 }
 
+resource "azurerm_role_assignment" "deployer_key_vault" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
+
 resource "azurerm_key_vault_secret" "secret_key" {
   name         = "secret-key"
   value        = var.secret_key
   key_vault_id = azurerm_key_vault.main.id
+  depends_on   = [azurerm_role_assignment.deployer_key_vault]
+}
+
+resource "azurerm_key_vault_secret" "encryption_key" {
+  name         = "encryption-key"
+  value        = var.encryption_key != "" ? var.encryption_key : var.secret_key
+  key_vault_id = azurerm_key_vault.main.id
+  depends_on   = [azurerm_role_assignment.deployer_key_vault]
 }
 
 resource "azurerm_key_vault_secret" "postgres_password" {
   name         = "postgres-password"
   value        = var.postgres_admin_password
   key_vault_id = azurerm_key_vault.main.id
+  depends_on   = [azurerm_role_assignment.deployer_key_vault]
 }
 
 resource "azurerm_key_vault_secret" "database_url" {
   name         = "database-url"
-  value        = "postgresql://${var.postgres_admin_username}:${var.postgres_admin_password}@${azurerm_postgresql_flexible_server.main.fqdn}:5432/${azurerm_postgresql_flexible_server_database.app.name}"
+  value        = "postgresql://${var.postgres_admin_username}:${urlencode(var.postgres_admin_password)}@${azurerm_postgresql_flexible_server.main.fqdn}:5432/${azurerm_postgresql_flexible_server_database.app.name}"
   key_vault_id = azurerm_key_vault.main.id
+  depends_on   = [azurerm_role_assignment.deployer_key_vault]
+}
+
+resource "azurerm_key_vault_secret" "smtp_password" {
+  count        = var.smtp_password != "" ? 1 : 0
+  name         = "smtp-password"
+  value        = var.smtp_password
+  key_vault_id = azurerm_key_vault.main.id
+  depends_on   = [azurerm_role_assignment.deployer_key_vault]
+}
+
+resource "azurerm_key_vault_secret" "payment_key_secret" {
+  count        = var.payment_key_secret != "" ? 1 : 0
+  name         = "payment-key-secret"
+  value        = var.payment_key_secret
+  key_vault_id = azurerm_key_vault.main.id
+  depends_on   = [azurerm_role_assignment.deployer_key_vault]
+}
+
+resource "azurerm_key_vault_secret" "payment_webhook_secret" {
+  count        = var.payment_webhook_secret != "" ? 1 : 0
+  name         = "payment-webhook-secret"
+  value        = var.payment_webhook_secret
+  key_vault_id = azurerm_key_vault.main.id
+  depends_on   = [azurerm_role_assignment.deployer_key_vault]
+}
+
+resource "azurerm_key_vault_secret" "gemini_api_key" {
+  count        = var.gemini_api_key != "" ? 1 : 0
+  name         = "gemini-api-key"
+  value        = var.gemini_api_key
+  key_vault_id = azurerm_key_vault.main.id
+  depends_on   = [azurerm_role_assignment.deployer_key_vault]
 }
 
 resource "azurerm_postgresql_flexible_server" "main" {
@@ -115,6 +180,14 @@ resource "azurerm_postgresql_flexible_server_database" "app" {
   collation = "en_US.utf8"
 }
 
+resource "azurerm_static_web_app" "frontend" {
+  name                = "swa-${local.name_prefix}-${local.suffix}"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = var.static_web_app_location
+  sku_tier            = "Free"
+  sku_size            = "Free"
+}
+
 resource "azurerm_container_app_environment" "main" {
   name                       = "cae-${local.name_prefix}-${local.suffix}"
   location                   = azurerm_resource_group.main.location
@@ -128,15 +201,16 @@ resource "azurerm_user_assigned_identity" "backend" {
   resource_group_name = azurerm_resource_group.main.name
 }
 
-data "azurerm_role_definition" "key_vault_secrets_user" {
-  name  = "Key Vault Secrets User"
-  scope = azurerm_key_vault.main.id
+resource "azurerm_role_assignment" "backend_key_vault" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.backend.principal_id
 }
 
-resource "azurerm_role_assignment" "backend_key_vault" {
-  scope              = azurerm_key_vault.main.id
-  role_definition_id = data.azurerm_role_definition.key_vault_secrets_user.id
-  principal_id       = azurerm_user_assigned_identity.backend.principal_id
+resource "azurerm_role_assignment" "backend_acr_pull" {
+  scope                = azurerm_container_registry.main.id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_user_assigned_identity.backend.principal_id
 }
 
 resource "azurerm_container_app" "backend" {
@@ -145,33 +219,90 @@ resource "azurerm_container_app" "backend" {
   container_app_environment_id = azurerm_container_app_environment.main.id
   revision_mode                = "Single"
 
+  depends_on = [
+    azurerm_role_assignment.backend_key_vault,
+    azurerm_role_assignment.backend_acr_pull,
+  ]
+
   identity {
     type         = "UserAssigned"
     identity_ids = [azurerm_user_assigned_identity.backend.id]
   }
 
+  registry {
+    server   = azurerm_container_registry.main.login_server
+    identity = azurerm_user_assigned_identity.backend.id
+  }
+
   secret {
     name                = "secret-key"
-    key_vault_secret_id = azurerm_key_vault_secret.secret_key.id
+    key_vault_secret_id = azurerm_key_vault_secret.secret_key.versionless_id
+    identity            = azurerm_user_assigned_identity.backend.id
+  }
+
+  secret {
+    name                = "encryption-key"
+    key_vault_secret_id = azurerm_key_vault_secret.encryption_key.versionless_id
     identity            = azurerm_user_assigned_identity.backend.id
   }
 
   secret {
     name                = "database-url"
-    key_vault_secret_id = azurerm_key_vault_secret.database_url.id
+    key_vault_secret_id = azurerm_key_vault_secret.database_url.versionless_id
     identity            = azurerm_user_assigned_identity.backend.id
+  }
+
+  dynamic "secret" {
+    for_each = azurerm_key_vault_secret.smtp_password
+    content {
+      name                = "smtp-password"
+      key_vault_secret_id = secret.value.versionless_id
+      identity            = azurerm_user_assigned_identity.backend.id
+    }
+  }
+
+  dynamic "secret" {
+    for_each = azurerm_key_vault_secret.payment_key_secret
+    content {
+      name                = "payment-key-secret"
+      key_vault_secret_id = secret.value.versionless_id
+      identity            = azurerm_user_assigned_identity.backend.id
+    }
+  }
+
+  dynamic "secret" {
+    for_each = azurerm_key_vault_secret.payment_webhook_secret
+    content {
+      name                = "payment-webhook-secret"
+      key_vault_secret_id = secret.value.versionless_id
+      identity            = azurerm_user_assigned_identity.backend.id
+    }
+  }
+
+  dynamic "secret" {
+    for_each = azurerm_key_vault_secret.gemini_api_key
+    content {
+      name                = "gemini-api-key"
+      key_vault_secret_id = secret.value.versionless_id
+      identity            = azurerm_user_assigned_identity.backend.id
+    }
   }
 
   template {
     container {
       name   = "backend"
-      image  = var.backend_image
+      image  = local.effective_backend_image
       cpu    = var.container_cpu
       memory = var.container_memory
 
       env {
-        name  = "ENVIRONMENT"
-        value = var.environment
+        name  = "ENV"
+        value = local.app_env
+      }
+
+      env {
+        name  = "ALLOWED_ORIGINS"
+        value = local.allowed_origins
       }
 
       env {
@@ -185,12 +316,118 @@ resource "azurerm_container_app" "backend" {
       }
 
       env {
+        name        = "ENCRYPTION_KEY"
+        secret_name = "encryption-key"
+      }
+
+      env {
+        name  = "OTP_PROVIDER"
+        value = var.otp_provider
+      }
+
+      env {
+        name  = "SMTP_HOST"
+        value = var.smtp_host
+      }
+
+      env {
+        name  = "SMTP_PORT"
+        value = tostring(var.smtp_port)
+      }
+
+      env {
+        name  = "SMTP_USER"
+        value = var.smtp_user
+      }
+
+      env {
+        name  = "SMTP_FROM_EMAIL"
+        value = var.smtp_from_email
+      }
+
+      dynamic "env" {
+        for_each = azurerm_key_vault_secret.smtp_password
+        content {
+          name        = "SMTP_PASSWORD"
+          secret_name = "smtp-password"
+        }
+      }
+
+      env {
+        name  = "PAYMENT_GATEWAY"
+        value = var.payment_gateway
+      }
+
+      env {
+        name  = "PAYMENT_KEY_ID"
+        value = var.payment_key_id
+      }
+
+      dynamic "env" {
+        for_each = azurerm_key_vault_secret.payment_key_secret
+        content {
+          name        = "PAYMENT_KEY_SECRET"
+          secret_name = "payment-key-secret"
+        }
+      }
+
+      dynamic "env" {
+        for_each = azurerm_key_vault_secret.payment_webhook_secret
+        content {
+          name        = "PAYMENT_WEBHOOK_SECRET"
+          secret_name = "payment-webhook-secret"
+        }
+      }
+
+      env {
+        name  = "BANK_DATA_PROVIDER"
+        value = var.bank_data_provider
+      }
+
+      env {
+        name  = "OCR_DEFAULT_LANG"
+        value = var.ocr_default_lang
+      }
+
+      env {
+        name  = "OCR_GEMINI_MODEL"
+        value = var.ocr_gemini_model
+      }
+
+      dynamic "env" {
+        for_each = azurerm_key_vault_secret.gemini_api_key
+        content {
+          name        = "GEMINI_API_KEY"
+          secret_name = "gemini-api-key"
+        }
+      }
+
+      env {
         name  = "UPLOAD_CONTAINER"
         value = azurerm_storage_container.documents.name
       }
+
+      liveness_probe {
+        transport               = "HTTP"
+        path                    = "/api/v1/health"
+        port                    = 8000
+        interval_seconds        = 30
+        timeout                 = 5
+        failure_count_threshold = 3
+      }
+
+      readiness_probe {
+        transport               = "HTTP"
+        path                    = "/api/v1/health"
+        port                    = 8000
+        interval_seconds        = 15
+        timeout                 = 5
+        success_count_threshold = 1
+        failure_count_threshold = 3
+      }
     }
 
-    min_replicas = 0
+    min_replicas = var.min_replicas
     max_replicas = 3
   }
 

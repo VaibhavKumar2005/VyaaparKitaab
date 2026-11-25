@@ -3,8 +3,8 @@ import { Receipt, PieChart, LogOut, ShieldCheck, ArrowLeft } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext';
 
 const links = [
-  { to: '/portal/bills', label: 'My Store Bills & Receipts (मेरे बिल)', icon: Receipt },
-  { to: '/portal/spending', label: 'Personal Spending & Cost Tracker (खर्च व वर्गीकरण)', icon: PieChart },
+  { to: '/portal/bills', label: 'My Store Bills & Receipts', icon: Receipt },
+  { to: '/portal/spending', label: 'Personal Spending & Cost Tracker', icon: PieChart },
 ];
 
 export function CustomerPortalShell() {
@@ -24,26 +24,29 @@ export function CustomerPortalShell() {
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
-          <Link
-            to="/app/dashboard"
-            className="hidden sm:flex items-center gap-1.5 text-xs text-primary font-medium hover:underline mr-2"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to Store Merchant App
-          </Link>
+        <div className="flex items-center gap-2 sm:gap-3">
+          {user?.role === 'STORE_OWNER' && (
+            <Link
+              to="/app/dashboard"
+              className="hidden sm:flex items-center gap-1.5 text-xs text-primary font-medium hover:underline mr-1"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" /> Back to Store Merchant App
+            </Link>
+          )}
 
           <div className="text-right text-xs hidden md:block">
-            <p className="font-medium text-ink">{user?.email ?? 'Customer'}</p>
+            <p className="font-medium text-ink truncate max-w-[180px]">{user?.email ?? 'Customer'}</p>
             <p className="text-[11px] text-ink-soft">Verified Customer Account</p>
           </div>
 
           <button
             type="button"
             onClick={logout}
-            className="flex items-center gap-1.5 rounded-md border border-rule bg-white px-2.5 py-1.5 text-xs font-medium text-ink-nav hover:text-ink hover:bg-chrome transition-colors"
+            className="flex items-center gap-1.5 rounded-md border border-rule bg-white px-2 sm:px-2.5 py-1.5 text-xs font-medium text-ink-nav hover:text-ink hover:bg-chrome transition-colors"
+            title="Sign out"
           >
             <LogOut className="h-3.5 w-3.5" />
-            <span>Sign out</span>
+            <span className="hidden sm:inline">Sign out</span>
           </button>
         </div>
       </header>

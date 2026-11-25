@@ -13,11 +13,16 @@ class Settings(BaseSettings):
     )
 
     DATABASE_URL: str = Field(default="postgresql://postgres@localhost:5432/vyaapardb")
+    DB_SSL_VERIFY: bool = Field(default=True)
     SECRET_KEY: str = Field(default="change-me-to-a-secure-random-key")
     ENCRYPTION_KEY: str = Field(default="")
     ENV: str = Field(default="development")
     ALLOWED_ORIGINS: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["*"]
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+        ]
     )
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30)
 
@@ -57,22 +62,44 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = Field(default="")
     OCR_GEMINI_MODEL: str = Field(default="gemini-2.5-flash")
 
+    # Optional Production Error Monitoring (Sentry Cloud or self-hosted GlitchTip DSN)
+    SENTRY_DSN: str = Field(default="")
+    SENTRY_TRACES_SAMPLE_RATE: float = Field(default=0.1)
+
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
     def parse_allowed_origins(cls, value):
         if value in (None, ""):
-            return ["*"]
+            return ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"]
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
     def validate_production_security(self) -> None:
-        if self.ENV.lower() == "production" and self.SECRET_KEY in (
+        if self.ENV.lower() != "production":
+            return
+        weak_keys = {
             "",
             "change-me-to-a-secure-random-key",
+            "generate-a-strong-secret-key-at-least-32-chars",
             "ci-secret",
+        }
+        if self.SECRET_KEY.strip() in weak_keys or len(self.SECRET_KEY.strip()) < 32:
+            raise ValueError("CRITICAL: SECRET_KEY must be a strong secret (>= 32 chars) in production")
+        if not self.ENCRYPTION_KEY.strip() or len(self.ENCRYPTION_KEY.strip()) < 32:
+            raise ValueError("CRITICAL: ENCRYPTION_KEY (>= 32 chars) must be set explicitly in production")
+        if "*" in self.ALLOWED_ORIGINS:
+            raise ValueError("CRITICAL: Wildcard '*' in ALLOWED_ORIGINS is forbidden in production")
+        if self.OTP_PROVIDER.strip().lower() == "sandbox":
+            raise ValueError("CRITICAL: OTP_PROVIDER='sandbox' is forbidden in production")
+        if self.PAYMENT_GATEWAY.strip().lower() == "razorpay" and not (
+            self.PAYMENT_KEY_ID.strip() and self.PAYMENT_KEY_SECRET.strip() and self.PAYMENT_WEBHOOK_SECRET.strip()
         ):
-            raise ValueError("CRITICAL: SECRET_KEY must be set to a strong secret in production")
+            raise ValueError(
+                "CRITICAL: PAYMENT_KEY_ID, PAYMENT_KEY_SECRET, and PAYMENT_WEBHOOK_SECRET are required for Razorpay in production"
+            )
+        if self.BANK_DATA_PROVIDER.strip().lower() == "setu_aa" and not self.SETU_AA_WEBHOOK_SECRET.strip():
+            raise ValueError("CRITICAL: SETU_AA_WEBHOOK_SECRET is required when BANK_DATA_PROVIDER='setu_aa' in production")
 
 
 @lru_cache(maxsize=1)

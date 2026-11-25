@@ -6,25 +6,29 @@ import {
   FileText,
   Layers,
   LayoutGrid,
+  ScanLine,
   Sparkles,
   TrendingUp,
   Wallet,
 } from 'lucide-react';
 import { BankingIncomeExplorer } from '../components/BankingIncomeExplorer';
 import { PaymentBreakdownChart } from '../components/PaymentBreakdownChart';
+import { ReceiptOcrModal } from '../components/ReceiptOcrModal';
 import { UnifiedCategoryPanel } from '../components/UnifiedCategoryPanel';
 import { ErrorState } from '../components/ui/ErrorState';
 import { LoadingState } from '../components/ui/LoadingState';
 import { StatusPill, paymentState } from '../components/StatusPill';
 import { useAiForecast, useStoreDashboard } from '../hooks/useDashboard';
 import { useInvoices } from '../hooks/useInvoices';
-import { useProducts } from '../hooks/useBusinessData';
+import { useBusinesses, useProducts } from '../hooks/useBusinessData';
 import { formatDate, formatINR, formatINRPrecise } from '../lib/format';
 
 type DashboardTab = 'overview' | 'unified' | 'statements' | 'ai_forecast' | 'all';
 
 export function StoreDashboard() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
+  const [showOcrModal, setShowOcrModal] = useState(false);
+  const { data: businesses } = useBusinesses();
   const dash = useStoreDashboard();
   const inv = useInvoices();
   const prod = useProducts();
@@ -78,22 +82,31 @@ export function StoreDashboard() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-bold">Store Financial Dashboard (व्यापार सारांश)</h1>
+          <h1 className="text-2xl font-bold">Store Financial Dashboard</h1>
           <p className="text-xs text-ink-soft mt-0.5">
             Real-time cash flow, payment collection channels, and inventory stock health.
           </p>
         </div>
-        <Link
-          to="/app/invoices/new"
-          className="rounded-md bg-navy px-4 py-2 text-xs font-semibold text-white hover:bg-navy-dark"
-        >
-          + Create New Bill
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowOcrModal(true)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-navy bg-canvas-raised px-3 py-2 text-xs font-semibold text-navy hover:bg-navy-tint transition-colors"
+          >
+            <ScanLine className="h-3.5 w-3.5" /> Scan Hindi / GST Bill
+          </button>
+          <Link
+            to="/app/invoices/new"
+            className="rounded-md bg-navy px-4 py-2 text-xs font-semibold text-white hover:bg-navy-dark"
+          >
+            + Create New Bill
+          </Link>
+        </div>
       </div>
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Summary">
         <Summary
-          label="Payments received (जमा)"
+          label="Payments received"
           value={formatINR(received)}
           note={
             (dash.data.totalDiscountsGiven ?? 0) > 0
@@ -102,7 +115,7 @@ export function StoreDashboard() {
           }
         />
         <Summary
-          label="Outstanding Udhar (बाकी)"
+          label="Outstanding Udhaar"
           value={formatINR(outstanding)}
           note={`${open.length} open invoice${open.length === 1 ? '' : 's'}`}
           emphasis={outstanding > 0}
@@ -243,7 +256,7 @@ export function StoreDashboard() {
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-bold text-ink flex items-center gap-2">
                   <Wallet className="h-4 w-4 text-navy" />
-                  Collection Mode Split (भुगतान माध्यम विवरण)
+                  Collection Mode Split
                 </h2>
                 <span className="num text-xs font-medium text-ink-soft">
                   Total Billed Sales: <strong className="text-ink">{formatINR(received + outstanding)}</strong>
@@ -279,7 +292,7 @@ export function StoreDashboard() {
                 <div className="rounded-md border border-rule bg-canvas-sunk p-3">
                   <div className="flex items-center gap-1.5 text-ink-soft">
                     <span className="h-2 w-2 rounded-full bg-positive" />
-                    <span>Cash (नकद गल्ला)</span>
+                    <span>Cash</span>
                   </div>
                   <p className="num mt-1 text-base font-bold text-ink">{formatINR(cashCollected)}</p>
                   <p className="text-[11px] text-ink-faint">{cashPct}% of volume</p>
@@ -307,7 +320,7 @@ export function StoreDashboard() {
               {topProducts.length > 0 && (
                 <div className="border-t border-rule pt-3">
                   <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft mb-2 flex items-center gap-1.5">
-                    <TrendingUp className="h-3.5 w-3.5 text-positive" /> Top Selling Items (सर्वाधिक बिक्री)
+                    <TrendingUp className="h-3.5 w-3.5 text-positive" /> Top Selling Items
                   </p>
                   <div className="grid gap-2 sm:grid-cols-2 text-xs">
                     {topProducts.slice(0, 4).map((tp) => (
@@ -327,7 +340,7 @@ export function StoreDashboard() {
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-bold text-ink flex items-center gap-1.5">
                     <AlertTriangle className="h-4 w-4 text-due" />
-                    Reorder Watchlist (कम स्टॉक)
+                    Reorder Watchlist
                   </h2>
                   <Link to="/app/products" className="text-xs font-medium text-navy hover:underline">
                     Inventory
@@ -379,7 +392,7 @@ export function StoreDashboard() {
             <div>
               <h2 className="text-sm font-bold text-ink flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-navy" />
-                AI Demand &amp; Cash-Flow Forecast (AI मांग एवं नकदी पूर्वानुमान)
+                AI Demand &amp; Cash-Flow Forecast
               </h2>
               <p className="text-xs text-ink-soft mt-0.5">
                 30-Day Rolling Window • Chronological 80/20 Validation • Active Model:{' '}
@@ -468,6 +481,12 @@ export function StoreDashboard() {
           )}
         </section>
       )}
+
+      <ReceiptOcrModal
+        open={showOcrModal}
+        businessId={businesses?.[0]?.id}
+        onClose={() => setShowOcrModal(false)}
+      />
     </div>
   );
 }

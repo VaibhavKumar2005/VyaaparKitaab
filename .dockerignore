@@ -1,0 +1,36 @@
+# Secrets & local env
+.env
+.env.*
+!.env.example
+
+# Version control & local caches
+.git
+.github
+.idea
+.vscode
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environments & dependencies
+.venv/
+venv/
+env/
+node_modules/
+
+# Frontend source, infra, tests & docs (not needed inside backend image)
+frontend/
+infra/
+tests/
+docs/
+synopsis/
+report_screenshots/
+.db_backups/
+.dist/
+*.pdf
+*.docx
+*.log
+*.sqlite3
+*.db

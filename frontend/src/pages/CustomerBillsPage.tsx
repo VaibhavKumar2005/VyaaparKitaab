@@ -114,7 +114,7 @@ export function CustomerBillsPage() {
     <div className="space-y-6">
       {/* Title */}
       <div>
-        <h1 className="text-2xl font-bold">My Bills & Receipts (मेरे बिल)</h1>
+        <h1 className="text-2xl font-bold">My Bills & Receipts</h1>
         <p className="mt-0.5 text-sm text-ink-soft">
           Verified store invoices linked to your mobile/email, digital payment receipts, and instant UPI clearing.
         </p>
@@ -128,12 +128,12 @@ export function CustomerBillsPage() {
           <p className="mt-1 text-xs text-ink-faint">Across all your recorded bills</p>
         </div>
         <div className="rounded-lg border border-rule bg-canvas-raised p-5">
-          <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Total Paid (जमा)</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Total Paid</p>
           <p className="num mt-2 text-2xl font-bold text-positive">{formatINR(summary.totalPaid)}</p>
           <p className="mt-1 text-xs text-ink-faint">Settled via UPI / Cash</p>
         </div>
         <div className="rounded-lg border border-rule bg-canvas-raised p-5">
-          <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Outstanding Balance (देय बाकी)</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Outstanding Balance</p>
           <p className="num mt-2 text-2xl font-bold text-due">{formatINR(summary.balanceDue)}</p>
           <p className="mt-1 text-xs text-ink-faint">Due for settlement</p>
         </div>
@@ -373,7 +373,7 @@ export function CustomerBillsPage() {
               </div>
               <div>
                 <h2 className="text-lg font-bold text-ink">
-                  Personal Spending &amp; Bank / UPI Statement Analytics (मेरा व्यक्तिगत खर्च)
+                  Personal Spending &amp; Bank / UPI Statement Analytics
                 </h2>
                 <p className="text-xs text-ink-soft mt-0.5">
                   Upload your real Google Pay (CSV / JSON / Takeout HTML), PhonePe, Paytm, or Bank (SBI / HDFC / ICICI / Axis) <strong>PDF, CSV, HTML, or JSON</strong> statement, or use the zero-credential Auto-Sync Bridge.

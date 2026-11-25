@@ -86,6 +86,12 @@ class SupplierCreate(BaseModel):
     business_id: UUID
 
 
+class SupplierUpdate(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+
+
 class SupplierRead(SupplierCreate):
     id: UUID
     created_at: datetime

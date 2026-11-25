@@ -34,6 +34,11 @@ import {
   type CreatePurchasePayload,
   type ParsedLineItem,
 } from '../hooks/usePurchases';
+import {
+  getOcrCapabilityStatusText,
+  OCR_MODE_OPTIONS,
+  type OcrMode,
+} from '../components/ReceiptOcrModal';
 import { formatINR, formatINRPrecise, formatDate } from '../lib/format';
 import { CATEGORY_TAXONOMY, TAXONOMY_CATEGORIES } from '../lib/taxonomy';
 
@@ -81,9 +86,10 @@ export function CustomerDashboard() {
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'form' | 'paste' | 'ocr'>('form');
-  const [ocrMode, setOcrMode] = useState<'auto' | 'hin' | 'handwriting'>('auto');
+  const [ocrMode, setOcrMode] = useState<OcrMode>('auto');
   const ocrFileInputRef = useRef<HTMLInputElement | null>(null);
   const { data: ocrCapabilities } = useOcrCapabilities();
+  const ocrCapText = getOcrCapabilityStatusText(ocrCapabilities);
 
   // Form Fields
   const [marketplace, setMarketplace] = useState('Amazon');
@@ -307,7 +313,7 @@ export function CustomerDashboard() {
           className="inline-flex items-center gap-2 rounded-lg bg-navy px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-navy/90 transition-colors"
         >
           <Plus className="h-4 w-4" />
-          <span>Record / Scan Purchase (खरीद दर्ज करें)</span>
+          <span>Record / Scan Purchase</span>
         </button>
       </div>
 
@@ -514,7 +520,7 @@ export function CustomerDashboard() {
               <Sparkles className="h-5 w-5 text-navy" />
               <div>
                 <h2 className="text-base font-semibold text-ink">
-                  Summary of Payments Made to Others (अन्य को किए गए भुगतान का सारांश)
+                  Summary of Payments Made to Others
                 </h2>
                 <p className="text-xs text-ink-soft">
                   Powered by Python <code className="font-mono text-navy">pandas</code> +{' '}
@@ -549,7 +555,7 @@ export function CustomerDashboard() {
               <table className="min-w-full text-xs">
                 <thead className="border-b border-rule bg-canvas-sunk text-left uppercase tracking-wider text-ink-soft">
                   <tr>
-                    <th className="px-3 py-2.5 font-semibold">Recipient / Payee (भुगतान प्राप्तकर्ता)</th>
+                    <th className="px-3 py-2.5 font-semibold">Recipient / Payee</th>
                     <th className="px-3 py-2.5 font-semibold">Type</th>
                     <th className="px-3 py-2.5 font-semibold">Primary Channel</th>
                     <th className="px-3 py-2.5 font-semibold">ML Cluster Tier (KMeans)</th>
@@ -642,7 +648,7 @@ export function CustomerDashboard() {
               </div>
               <div>
                 <h2 className="text-base font-bold text-ink">
-                  Store-Specific Graphical Transaction Explorer (किसी विशेष स्टोर के लेन-देन का ग्राफ़)
+                  Store-Specific Graphical Transaction Explorer
                 </h2>
                 <p className="text-xs text-ink-soft">
                   Select any store or merchant below to inspect every transaction, cumulative cost curve, UPI routing, and item breakdown graphically.
@@ -1559,24 +1565,12 @@ export function CustomerDashboard() {
                 <div className="rounded-lg border border-rule bg-canvas px-3 py-2.5 space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-[11px] font-semibold text-ink">Bill Script / Mode</span>
-                    {ocrCapabilities && (
-                      <span className="text-[10px] text-ink-soft">
-                        {ocrCapabilities.handwriting_vision_ready
-                          ? 'Hindi Handwriting AI Ready'
-                          : ocrCapabilities.hindi_offline_ready
-                            ? 'Offline Hindi (hin+eng) Ready'
-                            : 'Local Tesseract (English) · Set GEMINI_API_KEY or tesseract-ocr-hin for Hindi'}
-                      </span>
+                    {ocrCapText && (
+                      <span className="text-[10px] text-ink-soft">{ocrCapText}</span>
                     )}
                   </div>
                   <div className="grid grid-cols-3 gap-1.5 text-[11px]">
-                    {(
-                      [
-                        { id: 'auto', label: 'Auto (Eng + Hin)' },
-                        { id: 'hin', label: 'Hindi Printed' },
-                        { id: 'handwriting', label: 'Hindi Handwriting' },
-                      ] as const
-                    ).map((opt) => (
+                    {OCR_MODE_OPTIONS.map((opt) => (
                       <button
                         key={opt.id}
                         type="button"

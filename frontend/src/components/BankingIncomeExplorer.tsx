@@ -549,7 +549,7 @@ export function BankingIncomeExplorer() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-xl border border-rule bg-canvas p-4 shadow-2xs">
           <p className="text-[10px] font-bold uppercase tracking-wider text-ink-soft">
-            Total Inward Income (सकल आय)
+            Total Inward Income
           </p>
           <p className="num mt-1 text-2xl font-extrabold text-emerald-700">
             +{formatINRPrecise(incomeData.total_inward_income)}

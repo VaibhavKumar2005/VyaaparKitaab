@@ -78,7 +78,7 @@ export function UnifiedCategoryPanel({ view }: UnifiedCategoryPanelProps) {
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" />
             <h2 className="text-sm font-bold text-ink">
-              Ask VyaparKitaab AI (खर्च व बिक्री सहायक)
+              Ask VyaparKitaab AI
             </h2>
           </div>
           <div className="flex flex-wrap gap-1.5">

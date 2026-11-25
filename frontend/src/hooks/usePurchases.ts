@@ -57,6 +57,8 @@ export interface CreatePurchasePayload {
   order_id: string;
   items_note?: string;
   payment_method?: string;
+  business_id?: string;
+  customer_id?: string;
 }
 
 export interface ParsedLineItem {

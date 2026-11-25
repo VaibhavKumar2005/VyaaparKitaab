@@ -3,10 +3,12 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.cores.config import settings
 from app.cores.database import get_db
 from app.models.banking_consent import PaymentWebhookEvent
 from app.models.business import Business
@@ -183,20 +185,58 @@ async def verify_payment(
             status_code=400, detail="Payment order does not match invoice pending order"
         )
 
-    # Fetch method & VPA info if available
+    other_inv = (
+        await db.execute(
+            select(Invoice.id).where(
+                Invoice.pending_order_id == payload.order_id,
+                Invoice.id != invoice.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if other_inv is not None:
+        raise HTTPException(status_code=400, detail="Payment order belongs to another invoice")
+
+    # Fetch & verify payment state from gateway
     vpa = None
     raw_method = "UPI"
     raw_info: dict | None = None
+    live_gateway = (
+        settings.PAYMENT_GATEWAY.strip().lower() == "razorpay"
+        or settings.ENV.lower() not in ("development", "testing")
+    )
     try:
         payment_info = await payment_service.get_payment_info(payload.payment_id)
-        raw_info = payment_info
-        raw_method = payment_info.get("method", "UPI").upper()
+        raw_info = {k: v for k, v in payment_info.items() if k != "raw"}
+        raw_method = str(payment_info.get("method") or "UPI").upper()
         vpa = payment_info.get("vpa")
-    except (RuntimeError, ValueError, KeyError):
+    except (RuntimeError, ValueError, KeyError, httpx.HTTPError) as exc:
+        if live_gateway:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unable to verify payment status with payment gateway",
+            ) from exc
         raw_method = "UPI"
+        payment_info = None
 
-    # Determine exact settled amount
-    if invoice.pending_order_amount is not None:
+    if live_gateway:
+        if not payment_info or str(payment_info.get("status") or "").lower() != "captured":
+            raise HTTPException(status_code=400, detail="Payment is not captured at gateway")
+        if str(payment_info.get("order_id") or "") != payload.order_id:
+            raise HTTPException(status_code=400, detail="Gateway payment order ID mismatch")
+        gw_currency = str(payment_info.get("currency") or "").upper()
+        gw_amount = float(payment_info.get("amount") or 0.0)
+        if gw_currency != "INR" or gw_amount <= 0:
+            raise HTTPException(status_code=400, detail="Invalid gateway payment currency or amount")
+        if (
+            invoice.pending_order_amount is not None
+            and abs(gw_amount - float(invoice.pending_order_amount)) > 0.01
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Gateway captured amount does not match invoice pending order amount",
+            )
+        settled_amount = gw_amount
+    elif invoice.pending_order_amount is not None:
         settled_amount = float(invoice.pending_order_amount)
     elif raw_info and "amount" in raw_info and float(raw_info["amount"]) > 0:
         settled_amount = float(raw_info["amount"])

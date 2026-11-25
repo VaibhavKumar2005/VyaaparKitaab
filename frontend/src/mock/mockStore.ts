@@ -5,7 +5,7 @@ import {
   mockProducts,
   mockStoreDashboard,
 } from './mockData';
-import type { Business, Customer, Product } from '../hooks/useBusinessData';
+import type { Business, Customer, Product, Supplier } from '../hooks/useBusinessData';
 import type { Invoice, PaymentOrderData } from '../hooks/useInvoices';
 import type { StoreDashboardData } from '../hooks/useDashboard';
 
@@ -69,6 +69,27 @@ export function getMockCustomers(): Customer[] {
 
 export function getMockProducts(): Product[] {
   return storedProducts;
+}
+
+export function getMockSuppliers(): Supplier[] {
+  return [
+    {
+      id: 'sup-001',
+      name: 'Metro Cash & Carry Wholesale',
+      phone: '9811002233',
+      email: 'orders@metrowholesale.in',
+      business_id: 'biz-001',
+      created_at: new Date(Date.now() - 86400000 * 30).toISOString(),
+    },
+    {
+      id: 'sup-002',
+      name: 'Shree Ganesh Grain Distributors',
+      phone: '9822334455',
+      email: 'billing@ganeshgrains.in',
+      business_id: 'biz-001',
+      created_at: new Date(Date.now() - 86400000 * 14).toISOString(),
+    },
+  ];
 }
 
 export function getMockInvoices(): Invoice[] {
@@ -152,8 +173,8 @@ export function simulateMockPayment(
     success: true,
     message:
       method === 'CASH'
-        ? '₹ नकद भुगतान दर्ज किया गया (Cash payment recorded in ledger)'
-        : '₹ पेमेंट सफलतापूर्वक जमा हुआ (UPI Payment verified and settled)',
+        ? 'Cash payment recorded in ledger'
+        : 'UPI payment verified and settled',
     invoice_status: finalStatus,
   };
 }

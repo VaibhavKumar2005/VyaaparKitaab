@@ -5,8 +5,8 @@ resource "random_string" "suffix" {
 }
 
 locals {
-  name_prefix        = lower(var.project_name)
-  resource_group_name = "rg-${local.name_prefix}-${var.environment}-state"
+  name_prefix          = lower(var.project_name)
+  resource_group_name  = "rg-${local.name_prefix}-${var.environment}-state"
   storage_account_name = substr(lower(replace("st${local.name_prefix}${random_string.suffix.result}tf", "-", "")), 0, 24)
 }
 

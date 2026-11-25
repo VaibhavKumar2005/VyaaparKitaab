@@ -25,8 +25,9 @@ DATABASE_URL = _normalize_database_url(settings.DATABASE_URL)
 engine_kwargs = {"echo": False, "future": True}
 if _should_use_ssl(DATABASE_URL):
     ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
+    if not settings.DB_SSL_VERIFY:
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
     engine_kwargs["connect_args"] = {"ssl": ssl_context}
 
 engine = create_async_engine(DATABASE_URL, **engine_kwargs)

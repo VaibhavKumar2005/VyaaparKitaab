@@ -77,17 +77,38 @@ def _normalize_phone(phone: str) -> tuple[str, str]:
     return clean, e164
 
 
+_OTP_MAX_ATTEMPTS = 5
+_OTP_FAILED_ATTEMPTS: dict[str, int] = {}
+
+
+def _otp_pepper_key() -> bytes:
+    raw = (settings.SECRET_KEY or "vyaparkitaab-otp-pepper").encode("utf-8")
+    return hashlib.sha256(b"vk-otp-hmac-v1:" + raw).digest()
+
+
+def _mask_email(email: str) -> str:
+    parts = email.strip().split("@", 1)
+    if len(parts) != 2:
+        return "***"
+    local, domain = parts
+    visible = local[:2] if len(local) >= 2 else local[:1]
+    return f"{visible}***@{domain}"
+
+
 def generate_otp() -> str:
     # Use a cryptographically secure RNG for OTPs
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
-def hash_otp(otp: str) -> str:
-    return hashlib.sha256(otp.encode("utf-8")).hexdigest()
+def hash_otp(otp: str, context: str = "") -> str:
+    msg = f"{context}:{otp}".encode() if context else otp.encode()
+    return hmac.new(_otp_pepper_key(), msg, hashlib.sha256).hexdigest()
 
 
-def verify_otp(otp: str, otp_hash: str) -> bool:
-    return hmac.compare_digest(hash_otp(otp), otp_hash)
+def verify_otp(otp: str, otp_hash: str, context: str = "") -> bool:
+    if context and hmac.compare_digest(hash_otp(otp, context), otp_hash):
+        return True
+    return hmac.compare_digest(hash_otp(otp, ""), otp_hash)
 
 
 def _otp_db_key(identifier: str) -> str:
@@ -105,17 +126,20 @@ def _otp_db_purpose(purpose: str) -> str:
 
 
 async def store_otp(db: AsyncSession, phone: str, purpose: str, otp: str) -> OTPVerification:
-    # Store OTP as a hashed value in DB (short-lived). Later we can move this to Redis.
+    # Store OTP as an HMAC-peppered hash bound to identifier + purpose.
+    db_key = _otp_db_key(phone)
+    db_purpose = _otp_db_purpose(purpose)
     verification = OTPVerification(
-        phone=_otp_db_key(phone),
-        otp_hash=hash_otp(otp),
-        purpose=_otp_db_purpose(purpose),
+        phone=db_key,
+        otp_hash=hash_otp(otp, context=f"{db_key}:{db_purpose}"),
+        purpose=db_purpose,
         expires_at=datetime.now(UTC) + timedelta(minutes=5),
         used=False,
     )
     db.add(verification)
     await db.commit()
     await db.refresh(verification)
+    _OTP_FAILED_ATTEMPTS.pop(str(verification.id), None)
     return verification
 
 
@@ -198,9 +222,9 @@ async def dispatch_otp(
     smtp_ready = bool(settings.SMTP_USER and settings.SMTP_PASSWORD)
     if target_email and smtp_ready:
         await send_otp_email(target_email, otp, purpose=purpose)
-        logger.info("SMTP Email OTP dispatched to %s", target_email)
+        logger.info("SMTP Email OTP dispatched to %s", _mask_email(target_email))
         return {
-            "message": f"OTP sent to {target_email}",
+            "message": f"OTP sent to {_mask_email(target_email)}",
             "provider": "smtp_email",
             "channel": "email",
             "smtp_configured": True,
@@ -286,10 +310,22 @@ async def check_otp_code(
         .order_by(OTPVerification.created_at.desc())
     )
     verification = result.scalars().first()
-    if verification and verify_otp(otp.strip(), verification.otp_hash):
-        verification.used = True
-        await db.commit()
-        return True
+    if verification:
+        ctx = f"{verification.phone}:{db_purpose}"
+        if verify_otp(otp.strip(), verification.otp_hash, context=ctx):
+            verification.used = True
+            _OTP_FAILED_ATTEMPTS.pop(str(verification.id), None)
+            await db.commit()
+            return True
+
+        vid = str(verification.id)
+        fails = _OTP_FAILED_ATTEMPTS.get(vid, 0) + 1
+        _OTP_FAILED_ATTEMPTS[vid] = fails
+        if fails >= _OTP_MAX_ATTEMPTS:
+            verification.used = True
+            _OTP_FAILED_ATTEMPTS.pop(vid, None)
+            await db.commit()
+            return False
 
     # Allow 123456 fallback in dev/test for LOGIN purpose when no live provider is forced
     return bool(

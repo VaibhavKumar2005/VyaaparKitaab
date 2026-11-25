@@ -207,7 +207,7 @@ export function InvoiceForm() {
         <div className="border-b border-rule pb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <span className="text-xs font-semibold uppercase tracking-wider text-ink-soft">
-              Billing Entry (नया बिल बनाएं)
+              Billing Entry
             </span>
             <h1 className="text-2xl font-bold text-ink mt-0.5">New Tax Invoice</h1>
             <p className="text-xs text-ink-soft">
@@ -230,15 +230,15 @@ export function InvoiceForm() {
               onChange={(e) => setInvoiceType(e.target.value as 'SALE' | 'PURCHASE')}
               className="mt-1.5 w-full rounded-md border border-rule bg-canvas px-3 py-2 text-sm text-ink outline-none focus:border-navy"
             >
-              <option value="SALE">Sale (बिक्री / Credit)</option>
-              <option value="PURCHASE">Purchase (खरीद / Debit)</option>
+              <option value="SALE">Sale (Credit)</option>
+              <option value="PURCHASE">Purchase (Debit)</option>
             </select>
           </div>
 
           {/* Customer / Supplier */}
           <div>
             <label className="text-xs font-semibold uppercase tracking-wider text-ink-soft">
-              Customer Account (ग्राहक)
+              Customer Account
             </label>
             <select
               value={customerId}
@@ -267,9 +267,9 @@ export function InvoiceForm() {
               className="mt-1.5 w-full rounded-md border border-rule bg-canvas px-3 py-2 text-sm text-ink outline-none focus:border-navy"
             >
               <option value="UPI">UPI (Google Pay / PhonePe / Paytm)</option>
-              <option value="CASH">Cash (नकद)</option>
+              <option value="CASH">Cash</option>
               <option value="CARD">Debit / Credit Card</option>
-              <option value="CREDIT">Credit (उधारी / Khata)</option>
+              <option value="CREDIT">Credit (Udhaar)</option>
             </select>
           </div>
         </div>
@@ -278,7 +278,7 @@ export function InvoiceForm() {
         {!customerId && (
           <div>
             <label className="text-xs font-semibold uppercase tracking-wider text-ink-soft">
-              Customer Name / Mobile (ग्राहक का नाम)
+              Customer Name / Mobile
             </label>
             <input
               value={customCustomerName}
@@ -293,7 +293,7 @@ export function InvoiceForm() {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-ink-soft">
-              Line Items (सामान की सूची)
+              Line Items
             </h3>
             <button
               type="button"

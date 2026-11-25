@@ -209,7 +209,7 @@ export function CustomerList() {
           <p className="mt-1 text-xs text-ink-faint">Regular retail & wholesale buyers</p>
         </div>
         <div className="rounded-lg border border-rule bg-canvas-raised p-5">
-          <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Total Receivables (उधारी)</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Total Receivables</p>
           <p className="num mt-2 text-2xl font-bold text-due">{formatINR(totalReceivables)}</p>
           <p className="mt-1 text-xs text-ink-faint">Due across all open invoices</p>
         </div>
@@ -262,10 +262,10 @@ export function CustomerList() {
             <thead className="border-b border-rule bg-canvas-sunk text-left text-xs uppercase tracking-wider text-ink-soft">
               <tr>
                 <th scope="col" className="px-4 py-3 font-semibold">Customer / Shop Name</th>
-                <th scope="col" className="px-4 py-3 font-semibold">Contact (संपर्क)</th>
+                <th scope="col" className="px-4 py-3 font-semibold">Contact</th>
                 <th scope="col" className="px-4 py-3 text-right font-semibold">Bills</th>
                 <th scope="col" className="px-4 py-3 text-right font-semibold">Total Billed</th>
-                <th scope="col" className="px-4 py-3 text-right font-semibold">Balance Due (उधारी)</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Balance Due</th>
                 <th scope="col" className="px-4 py-3 font-semibold">Status</th>
                 <th scope="col" className="px-4 py-3 text-right font-semibold">Action</th>
               </tr>

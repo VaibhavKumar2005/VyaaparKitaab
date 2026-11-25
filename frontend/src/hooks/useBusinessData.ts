@@ -4,6 +4,7 @@ import {
   getMockBusinesses,
   getMockCustomers,
   getMockProducts,
+  getMockSuppliers,
   isDemoMode,
 } from '../mock/mockStore';
 
@@ -34,6 +35,15 @@ export type Product = {
   selling_price: number;
   cost_price?: number | null;
   stock_qty: number;
+  business_id: string;
+  created_at: string;
+};
+
+export type Supplier = {
+  id: string;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
   business_id: string;
   created_at: string;
 };
@@ -200,6 +210,59 @@ export function useDeleteProduct() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['products'] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useSuppliers() {
+  return useQuery({
+    queryKey: ['suppliers'],
+    queryFn: async () => {
+      if (isDemoMode()) {
+        return getMockSuppliers();
+      }
+      return await apiFetch<Supplier[]>('/suppliers');
+    },
+  });
+}
+
+export function useCreateSupplier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { name: string; phone?: string | null; email?: string | null; business_id: string }) =>
+      apiFetch<Supplier>('/suppliers', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+    },
+  });
+}
+
+export function useUpdateSupplier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...payload }: { id: string; name?: string; phone?: string | null; email?: string | null }) =>
+      apiFetch<Supplier>(`/suppliers/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+    },
+  });
+}
+
+export function useDeleteSupplier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) =>
+      apiFetch<{ deleted: boolean; id: string }>(`/suppliers/${id}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['suppliers'] });
     },
   });
 }

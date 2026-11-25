@@ -16,3 +16,4 @@ python-multipart
 Pillow
 pytesseract
 pypdf>=4
+sentry-sdk[fastapi]>=2

@@ -5,6 +5,7 @@ import {
   Receipt,
   Users,
   Package,
+  Truck,
   LogOut,
   Plus,
   RotateCcw,
@@ -24,6 +25,7 @@ const tabs = [
   { to: '/app/invoices', label: 'Invoices & Billing', icon: Receipt },
   { to: '/app/customers', label: 'Customers & Udhaar', icon: Users },
   { to: '/app/products', label: 'Inventory Stock', icon: Package },
+  { to: '/app/suppliers', label: 'Suppliers', icon: Truck },
 ];
 
 export function AppShell() {
@@ -52,51 +54,58 @@ export function AppShell() {
   return (
     <div className="min-h-screen bg-canvas text-ink flex flex-col font-sans">
       {/* ─── Storey 1: SAP 60px Global Chrome Bar ─── */}
-      <header className="no-print h-[60px] bg-chrome border-b border-rule px-4 sm:px-6 flex items-center justify-between shrink-0">
+      <header className="no-print h-[60px] bg-chrome border-b border-rule px-3 sm:px-6 flex items-center justify-between gap-2 shrink-0">
         {/* Brand identity */}
-        <div className="flex items-center gap-3">
-          <span className="font-display text-lg font-bold text-ink tracking-tight">VyaparKitaab</span>
-          <span className="hidden sm:inline-block h-4 w-px bg-rule" />
-          <span className="hidden sm:inline-block text-xs text-ink-nav">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="font-display text-base sm:text-lg font-bold text-ink tracking-tight truncate">VyaparKitaab</span>
+          <span className="hidden lg:inline-block h-4 w-px bg-rule" />
+          <span className="hidden lg:inline-block text-xs text-ink-nav">
             MSME Digital Bahi-Khata & Operating System
           </span>
         </div>
 
         {/* Real-time backend vs Demo switcher */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 shrink-0">
           {!isDemo ? (
-            <div className="flex items-center gap-2 rounded-md border border-rule bg-white px-3 py-1.5 text-xs">
-              <span className="relative flex h-2 w-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 rounded-md border border-rule bg-white px-2 sm:px-3 py-1.5 text-xs">
+              <span className="relative flex h-2 w-2 shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-positive opacity-75" />
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-positive" />
               </span>
-              <span className="font-semibold text-ink">🟢 Live PostgreSQL Database</span>
+              <span className="font-semibold text-ink">
+                <span className="sm:hidden">Live</span>
+                <span className="hidden sm:inline">Live Sync</span>
+              </span>
               <button
                 type="button"
                 onClick={handleToggleMode}
                 title="Switch to offline sample store"
-                className="ml-2 text-[11px] text-primary font-medium hover:underline flex items-center gap-1"
+                className="ml-1 sm:ml-2 text-[11px] text-primary font-medium hover:underline flex items-center gap-1"
               >
-                <SlidersHorizontal className="h-3 w-3" /> Sample Demo
+                <SlidersHorizontal className="h-3 w-3" />
+                <span className="hidden sm:inline">Demo</span>
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-900">
-              <Database className="h-3.5 w-3.5 text-amber-700" />
-              <span>⚡ <strong>Sample Store Data</strong> (Offline Sandbox)</span>
+            <div className="flex items-center gap-1.5 sm:gap-2 rounded-md border border-amber-300 bg-amber-50 px-2 sm:px-3 py-1.5 text-xs text-amber-900">
+              <Database className="h-3.5 w-3.5 text-amber-700 shrink-0" />
+              <span className="font-semibold">
+                <span className="sm:hidden">Demo</span>
+                <span className="hidden sm:inline">Sample Store Data</span>
+              </span>
               <button
                 type="button"
                 onClick={handleToggleMode}
                 title="Connect to live PostgreSQL backend"
-                className="ml-2 font-semibold text-primary hover:underline"
+                className="ml-1 sm:ml-2 font-semibold text-primary hover:underline"
               >
-                Connect Live DB
+                Go Live
               </button>
               <button
                 type="button"
                 onClick={handleResetData}
                 title="Reset sample data"
-                className="ml-1 text-[11px] text-ink-soft hover:underline flex items-center gap-0.5"
+                className="hidden sm:flex ml-1 text-[11px] text-ink-soft hover:underline items-center gap-0.5"
               >
                 <RotateCcw className="h-3 w-3" /> Reset
               </button>
@@ -105,36 +114,37 @@ export function AppShell() {
         </div>
 
         {/* User Account & Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
           {!isDemo && (
             <button
               type="button"
               onClick={() => setShowSettings(true)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-rule bg-white px-2.5 py-1.5 text-xs font-medium text-ink-nav hover:text-ink hover:bg-canvas transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-md border border-rule bg-white px-2 sm:px-2.5 py-1.5 text-xs font-medium text-ink-nav hover:text-ink hover:bg-canvas transition-colors"
               title="Edit Store Name, GSTIN, Address & UPI ID"
             >
               <Settings className="h-3.5 w-3.5" />
-              <span className="hidden lg:inline">Store Settings</span>
+              <span className="hidden xl:inline">Store Settings</span>
             </button>
           )}
           <Link
             to="/portal/bills"
-            className="hidden lg:inline-flex items-center gap-1.5 rounded-md border border-rule bg-white px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-canvas transition-colors"
+            className="hidden sm:inline-flex items-center gap-1.5 rounded-md border border-rule bg-white px-2 sm:px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-canvas transition-colors"
             title="Switch to Customer Passbook view"
           >
             <ShoppingBag className="h-3.5 w-3.5" />
-            <span>Customer Passbook</span>
+            <span className="hidden xl:inline">Customer Passbook</span>
           </Link>
           <div className="hidden md:block text-right text-xs">
-            <p className="font-medium text-ink truncate max-w-[200px]">{user?.email ?? 'Merchant'}</p>
-            <p className="text-[11px] text-ink-soft">
+            <p className="font-medium text-ink truncate max-w-[160px]">{user?.email ?? 'Merchant'}</p>
+            <p className="text-[11px] text-ink-soft truncate max-w-[160px]">
               {!isDemo ? primaryStoreName : 'Demo Sandbox Session'}
             </p>
           </div>
           <button
             type="button"
             onClick={logout}
-            className="flex items-center gap-1.5 rounded-md border border-rule bg-white px-2.5 py-1.5 text-xs font-medium text-ink-nav hover:text-ink hover:bg-chrome transition-colors"
+            className="flex items-center gap-1.5 rounded-md border border-rule bg-white px-2 sm:px-2.5 py-1.5 text-xs font-medium text-ink-nav hover:text-ink hover:bg-chrome transition-colors"
+            title="Sign out"
           >
             <LogOut className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Sign out</span>

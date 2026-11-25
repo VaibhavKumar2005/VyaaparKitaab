@@ -147,6 +147,13 @@ def main() -> int:
         f"provider={cfg.BANK_DATA_PROVIDER}, credentials={'SET' if setu_ready else 'UNSET (statement upload & bridge active)'}",
     )
 
+    sentry_set = bool(cfg.SENTRY_DSN.strip())
+    _status_line(
+        "OK" if sentry_set else "OPTIONAL",
+        "Error Monitoring (Sentry)",
+        "SENTRY_DSN=SET (PII scrubbing enabled)" if sentry_set else "SENTRY_DSN=UNSET (optional Sentry/GlitchTip monitoring)",
+    )
+
     return 0
 
 

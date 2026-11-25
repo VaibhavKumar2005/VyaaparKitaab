@@ -216,8 +216,8 @@ export function ProductList() {
               <tr>
                 <th scope="col" className="px-4 py-3 font-semibold">Product Name</th>
                 <th scope="col" className="px-4 py-3 font-semibold">SKU Code</th>
-                <th scope="col" className="px-4 py-3 text-right font-semibold">Cost (लागत)</th>
-                <th scope="col" className="px-4 py-3 text-right font-semibold">Selling Price (बिक्री)</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Cost Price</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Selling Price</th>
                 <th scope="col" className="px-4 py-3 text-right font-semibold">Available Stock</th>
                 {!isDemoMode() && <th scope="col" className="px-4 py-3 text-right font-semibold">Actions</th>}
               </tr>

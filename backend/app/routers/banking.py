@@ -1,4 +1,7 @@
 import base64
+import hashlib
+import hmac
+import json
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -7,6 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.cores.config import settings
 from app.cores.database import get_db
 from app.models.user import User
 from app.schemas.banking import (
@@ -70,9 +74,14 @@ async def authorize_banking_consent(
     user: User = Depends(get_current_user),
 ):
     """
-    Simulates the customer approving the read-only consent artifact inside their banking app.
-    Activates the secure, read-only inward credit data session in PostgreSQL.
+    Simulates the customer approving the read-only consent artifact inside their banking app
+    STRICTLY in local mock sandbox mode. Disabled for live AA providers and in production.
     """
+    if settings.ENV.lower() not in ("development", "testing") or settings.BANK_DATA_PROVIDER.strip().lower() != "mock":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Self-approval is disabled for live Account Aggregator providers; consent must arrive via signed AA webhook.",
+        )
     return await aa_service.authorize_consent(
         db=db,
         user_id=user.id,
@@ -122,12 +131,35 @@ async def get_income_graph(
 async def banking_aa_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
+    x_setu_signature: str | None = Header(default=None),
+    x_webhook_signature: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """
-    Receives Setu AA v2 consent status notifications (ACTIVE, REJECTED, REVOKED)
-    and updates the corresponding BankingConsent record in PostgreSQL.
+    Receives Setu AA v2 consent status notifications (ACTIVE, REJECTED, REVOKED),
+    verifies the HMAC-SHA256 webhook signature, and updates BankingConsent in PostgreSQL.
     """
-    payload = await request.json()
+    raw_body = await request.body()
+    secret = (settings.SETU_AA_WEBHOOK_SECRET or "").strip()
+    sig_header = (x_setu_signature or x_webhook_signature or "").strip()
+
+    if secret:
+        if not sig_header:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing AA webhook signature")
+        provided = sig_header.removeprefix("sha256=").strip()
+        expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, provided):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid AA webhook signature")
+    elif settings.ENV.lower() not in ("development", "testing"):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AA webhook secret is not configured",
+        )
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook JSON") from exc
+
     return await aa_service.handle_consent_webhook(db=db, payload=payload)
 
 

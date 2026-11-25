@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -19,7 +20,28 @@ from app.routers.purchases import router as purchases_router
 from app.routers.streams import router as streams_router
 from app.routers.transactions import router as transactions_router
 
-FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
+FRONTEND_DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+logger = logging.getLogger(__name__)
+
+
+def _init_sentry() -> None:
+    dsn = (settings.SENTRY_DSN or "").strip()
+    if not dsn:
+        return
+    try:
+        import sentry_sdk  # type: ignore[import-not-found]
+
+        sentry_sdk.init(
+            dsn=dsn,
+            environment=settings.ENV,
+            traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+            send_default_pii=False,
+        )
+    except ImportError:
+        logger.warning("SENTRY_DSN is set but sentry-sdk is not installed; skipping Sentry init")
+
+
+_init_sentry()
 
 
 @asynccontextmanager
@@ -69,19 +91,18 @@ async def add_security_headers(request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
-    allow_origin_regex=r"https?://.*\.vercel\.app.*",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Ingest-Token", "X-Razorpay-Signature", "X-Setu-Signature"],
 )
 
-if FRONTEND_DIR.exists():
-    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+if (FRONTEND_DIST_DIR / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="assets")
 
 
 @app.get("/")
 def root():
-    index_file = FRONTEND_DIR / "index.html"
+    index_file = FRONTEND_DIST_DIR / "index.html"
     if index_file.exists():
         return FileResponse(index_file)
     return {"status": "backend running"}

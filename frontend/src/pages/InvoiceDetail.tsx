@@ -147,8 +147,8 @@ export function InvoiceDetail() {
       await updateStatus.mutateAsync({ id: data.id, status: 'PAID' });
       setPaymentMsg(
         changeToReturn > 0
-          ? `₹ नकद भुगतान दर्ज (Cash received ${formatINRPrecise(cashGivenNum)}, return change ${formatINRPrecise(changeToReturn)})`
-          : '₹ नकद भुगतान सफलतापूर्वक दर्ज किया गया (Cash payment recorded!)',
+          ? `Cash received ${formatINRPrecise(cashGivenNum)}, return change ${formatINRPrecise(changeToReturn)}`
+          : 'Cash payment recorded!',
       );
       setShowCashModal(false);
       void refetch();
@@ -190,7 +190,7 @@ export function InvoiceDetail() {
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-rule pb-6">
           <div>
             <span className="text-xs font-semibold uppercase tracking-wider text-ink-soft">
-              GST Tax Invoice (कर बीजक)
+              GST Tax Invoice
             </span>
             <h1 className="num text-2xl sm:text-3xl font-bold text-ink mt-1">
               {data.invoice_number}
@@ -210,7 +210,7 @@ export function InvoiceDetail() {
         {/* Business & Customer Details (Bahi-Khata ledger heads) */}
         <div className="grid gap-6 sm:grid-cols-2 text-sm">
           <div className="rounded-md border border-rule bg-canvas-sunk p-4 space-y-1">
-            <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Billed By (विक्रेता)</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Billed By</p>
             <p className="font-bold text-ink">{sellerName}</p>
             {sellerGstin && (
               <p className="text-xs text-ink-soft">GSTIN: <span className="font-mono text-ink">{sellerGstin}</span></p>
@@ -220,7 +220,7 @@ export function InvoiceDetail() {
           </div>
 
           <div className="rounded-md border border-rule bg-canvas-sunk p-4 space-y-1">
-            <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Billed To (क्रेता / ग्राहक)</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-ink-soft">Billed To</p>
             <p className="font-bold text-ink">{customer?.name ?? (isSale ? 'Walk-in Retail Customer' : 'Registered Supplier')}</p>
             {customer?.phone && <p className="text-xs text-ink-soft">Phone: <span className="num font-semibold text-ink">{customer.phone}</span></p>}
             {customer?.email && <p className="text-xs text-ink-soft">Email: {customer.email}</p>}
@@ -279,7 +279,7 @@ export function InvoiceDetail() {
 
           <div className="w-full sm:w-72 space-y-2 text-sm">
             <div className="flex justify-between text-ink-soft">
-              <span>Subtotal (मूल रकम):</span>
+              <span>Subtotal:</span>
               <span className="num font-medium text-ink">{formatINRPrecise(data.subtotal)}</span>
             </div>
             <div className="flex justify-between text-ink-soft">
@@ -299,14 +299,14 @@ export function InvoiceDetail() {
               <span className="num text-navy">{formatINRPrecise(data.total_amount)}</span>
             </div>
             <div className="flex justify-between text-ink-soft text-xs">
-              <span>Paid Amount (जमा):</span>
+              <span>Paid Amount:</span>
               <span className="num font-semibold text-positive">
                 + {formatINRPrecise(data.paid_amount)}
               </span>
             </div>
             <div className="flex justify-between border-t border-rule pt-2 font-bold text-sm">
               <span className={dueAmount > 0 ? 'text-due' : 'text-positive'}>
-                {dueAmount > 0 ? 'Balance Due (बाकी उधारी):' : 'Settled Balance:'}
+                {dueAmount > 0 ? 'Balance Due:' : 'Settled Balance:'}
               </span>
               <span className={`num ${dueAmount > 0 ? 'text-due' : 'text-positive'}`}>
                 {formatINRPrecise(dueAmount)}
@@ -321,7 +321,7 @@ export function InvoiceDetail() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
                 <h3 className="font-bold text-navy flex items-center gap-2 text-sm">
-                  <QrCode className="h-4 w-4" /> Collect Payment (भुगतान स्वीकार करें)
+                  <QrCode className="h-4 w-4" /> Collect Payment
                 </h3>
                 <p className="text-xs text-ink-soft mt-0.5">
                   Collect the outstanding balance of{' '}
@@ -340,7 +340,7 @@ export function InvoiceDetail() {
                     className="inline-flex items-center justify-center gap-1.5 rounded-md border border-rule bg-canvas-raised px-3.5 py-2 text-xs font-semibold text-ink hover:bg-canvas-sunk"
                   >
                     <Banknote className="h-4 w-4 text-positive" />
-                    Record Cash (नकद)
+                    Record Cash
                   </button>
                   <button
                     type="button"
@@ -359,7 +359,7 @@ export function InvoiceDetail() {
               <div className="mt-3 rounded-md border border-rule bg-canvas-raised p-4 space-y-4">
                 <div className="flex items-center justify-between border-b border-rule pb-2">
                   <span className="text-xs font-bold uppercase tracking-wider text-ink">
-                    Cash Counter Calculator (नकद हिसाब)
+                    Cash Counter Calculator
                   </span>
                   <span className="num text-xs font-semibold text-due">
                     Bill Due: {formatINRPrecise(dueAmount)}
@@ -368,7 +368,7 @@ export function InvoiceDetail() {
                 <div className="grid gap-4 sm:grid-cols-2 items-center">
                   <div>
                     <label className="block text-xs font-medium text-ink-soft">
-                      Cash Received from Customer (प्राप्त नकद ₹)
+                      Cash Received from Customer (₹)
                     </label>
                     <input
                       type="number"
@@ -380,7 +380,7 @@ export function InvoiceDetail() {
                     />
                   </div>
                   <div className="rounded-md bg-canvas-sunk p-3 border border-rule">
-                    <span className="block text-xs text-ink-soft">Change to Return (वापस करने योग्य छुट्टे)</span>
+                    <span className="block text-xs text-ink-soft">Change to Return</span>
                     <span className="num mt-1 block text-lg font-bold text-positive">
                       {formatINRPrecise(changeToReturn)}
                     </span>
