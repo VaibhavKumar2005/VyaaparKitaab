@@ -39,6 +39,7 @@ import {
   downloadSampleStatementPdf,
 } from '../hooks/useBankingIncome';
 import { isDemoMode } from '../mock/mockStore';
+import { usePaymentGatewayStatus } from '../hooks/usePayments';
 import { usePaymentStream } from '../hooks/usePaymentStream';
 import { formatINR, formatINRPrecise } from '../lib/format';
 import { LiveBankFeed } from './LiveBankFeed';
@@ -55,6 +56,7 @@ const SUPPORTED_BANKS = [
 export function BankingIncomeExplorer() {
   const { data: incomeData, isLoading, isError, refetch } = useIncomeStream();
   const { data: graphData } = useIncomeGraph();
+  const { data: gatewayStatus } = usePaymentGatewayStatus();
   const initiateConsentMutation = useInitiateBankingConsent();
   const revokeConsentMutation = useRevokeBankingConsent();
   const importStatementMutation = useImportStatement();
@@ -200,6 +202,12 @@ export function BankingIncomeExplorer() {
 
   const activeConsent = incomeData?.active_consent;
   const isConnected = incomeData?.is_connected && activeConsent?.status === 'APPROVED';
+  const dataMode = incomeData?.security_metadata?.data_mode;
+  const showingLiveImportedData = !isDemoMode() && dataMode === 'LIVE_IMPORTED';
+  const showingAaSandbox =
+    isDemoMode() ||
+    dataMode === 'SANDBOX_SAMPLE' ||
+    (gatewayStatus?.is_aa_sandbox !== false && !showingLiveImportedData);
 
   const monthlyTrend = incomeData?.monthly_trend || [];
   const [throttledTrend, setThrottledTrend] = useState(monthlyTrend);
@@ -342,6 +350,37 @@ export function BankingIncomeExplorer() {
           </div>
         </form>
       )}
+
+      {/* Smart Dynamic Mode Banner: Live Data vs AA Sandbox Disclosure */}
+      {showingLiveImportedData ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-2.5 text-xs text-emerald-950">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white">
+              LIVE DATA
+            </span>
+            <span>
+              Showing your real imported Bank / UPI / Razorpay transactions stored in PostgreSQL.
+            </span>
+          </div>
+          {gatewayStatus?.is_aa_sandbox && (
+            <span className="text-[11px] text-emerald-800">
+              Account Aggregator FIU remains in sandbox mode (enterprise phase).
+            </span>
+          )}
+        </div>
+      ) : showingAaSandbox ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50/80 px-4 py-2.5 text-xs text-amber-950">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-600 px-2 py-0.5 text-[10px] font-bold text-white">
+              AA SANDBOX
+            </span>
+            <span>
+              <strong>Account Aggregator is in Sandbox / Sample mode</strong> (live RBI AA requires a regulated FIU license).
+              Upload a real Bank/UPI statement, enable <strong>Auto-Sync GPay / Paytm</strong>, or connect <strong>Razorpay</strong> to view live personal/store data now.
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       {/* Main Header Strip */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-rule pb-4">

@@ -1,6 +1,7 @@
 """Match real bank/UPI credits against open store invoices and settle atomically."""
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -8,12 +9,13 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.cores.money import ZERO, money_to_float, to_money
 from app.models.banking_consent import BankTransaction
 from app.models.business import Business, Customer
 from app.models.payment import Payment
 from app.models.transaction import Invoice
 from app.models.user import User
-from app.services.payment_recorder import record_payment
+from app.services.payment_recorder import OverpaymentError, record_payment
 
 
 def _recon_payment_id(user_id: UUID, txn_id: str) -> str:
@@ -74,20 +76,20 @@ async def find_reconciliation_suggestions(
     for tx in credits:
         if _recon_payment_id(user.id, tx.txn_id) in already_reconciled:
             continue
-        tx_amount = round(float(tx.amount), 2)
+        tx_amount_dec = to_money(tx.amount)
         haystack = f"{tx.narration or ''} {tx.counterparty or ''}".lower()
 
         best_match: tuple[int, dict[str, Any]] | None = None
         for inv in open_invoices:
-            due = round(max(float(inv.total_amount) - float(inv.paid_amount or 0.0), 0.0), 2)
-            if due <= 0:
+            due_dec = max(to_money(inv.total_amount) - to_money(inv.paid_amount or ZERO), ZERO)
+            if due_dec <= ZERO or tx_amount_dec > due_dec:
                 continue
 
             cust = customers_map.get(inv.customer_id) if inv.customer_id else None
             inv_num_lower = (inv.invoice_number or "").lower()
             has_inv_ref = bool(inv_num_lower and inv_num_lower in haystack)
-            amount_diff = abs(tx_amount - due)
-            amount_exact = amount_diff <= 1.0
+            amount_diff = abs(tx_amount_dec - due_dec)
+            amount_exact = amount_diff <= Decimal("1.00")
             tokens = _customer_tokens(cust.name if cust else None)
             has_cust_match = any(tok in haystack for tok in tokens)
 
@@ -101,7 +103,7 @@ async def find_reconciliation_suggestions(
                 reasons.append(f"Narration references {inv.invoice_number}")
             if amount_exact:
                 score += 40
-                reasons.append(f"Exact amount match (₹{due:.2f})")
+                reasons.append(f"Exact amount match (₹{due_dec:.2f})")
             if has_cust_match and cust:
                 score += 20
                 reasons.append(f"Payer matches {cust.name}")
@@ -109,7 +111,7 @@ async def find_reconciliation_suggestions(
             confidence = "HIGH" if score >= 60 else "MEDIUM"
             candidate = {
                 "txn_id": tx.txn_id,
-                "txn_amount": tx_amount,
+                "txn_amount": money_to_float(tx_amount_dec),
                 "txn_date": tx.date,
                 "txn_app": tx.app,
                 "counterparty": tx.counterparty,
@@ -117,7 +119,7 @@ async def find_reconciliation_suggestions(
                 "invoice_id": str(inv.id),
                 "invoice_number": inv.invoice_number,
                 "customer_name": cust.name if cust else "Walk-in Customer",
-                "due_amount": due,
+                "due_amount": money_to_float(due_dec),
                 "confidence": confidence,
                 "match_reason": " · ".join(reasons),
             }
@@ -153,36 +155,66 @@ async def apply_bank_reconciliation(
     owned_businesses = select(Business.id).where(Business.owner_id == user.id)
     invoice = (
         await db.execute(
-            select(Invoice).where(
+            select(Invoice)
+            .where(
                 Invoice.id == invoice_id,
                 Invoice.business_id.in_(owned_businesses),
             )
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     if invoice is None:
         raise HTTPException(status_code=404, detail="Open store invoice not found")
 
-    due = round(max(float(invoice.total_amount) - float(invoice.paid_amount or 0.0), 0.0), 2)
-    if due <= 0:
+    due_dec = max(to_money(invoice.total_amount) - to_money(invoice.paid_amount or ZERO), ZERO)
+    if due_dec <= ZERO:
         raise HTTPException(status_code=400, detail="Invoice is already fully settled")
 
-    settled_amt = round(min(float(tx.amount), due), 2)
-    rec = await record_payment(
-        db,
-        {
-            "payment_id": _recon_payment_id(user.id, tx.txn_id),
-            "order_id": f"recon_{tx.txn_id[:40]}",
-            "invoice_id": invoice.id,
-            "business_id": invoice.business_id,
-            "customer_id": invoice.customer_id,
-            "amount": settled_amt,
-            "currency": "INR",
-            "method": tx.mode or "UPI",
-            "vpa": tx.vpa,
-            "status": "captured",
-            "raw_response": {"reconciled_txn_id": tx.txn_id, "source": tx.source},
-        },
-    )
+    recon_pid = _recon_payment_id(user.id, tx.txn_id)
+    already_recorded = (
+        await db.execute(select(Payment.id).where(Payment.payment_id == recon_pid))
+    ).scalar_one_or_none()
+    if already_recorded is not None:
+        return {
+            "reconciled": False,
+            "invoice_id": str(invoice.id),
+            "invoice_number": invoice.invoice_number,
+            "invoice_status": invoice.status,
+            "paid_amount": money_to_float(invoice.paid_amount or ZERO),
+            "message": "Payment already recorded (duplicate skipped)",
+        }
+
+    tx_amt = to_money(tx.amount)
+    if tx_amt <= ZERO:
+        raise HTTPException(status_code=400, detail="Bank credit amount must be positive")
+    if tx_amt > due_dec:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Overpayment rejected: bank credit {tx_amt} exceeds invoice balance due {due_dec}",
+        )
+
+    try:
+        rec = await record_payment(
+            db,
+            {
+                "payment_id": recon_pid,
+                "order_id": f"recon_{tx.txn_id[:40]}",
+                "invoice_id": invoice.id,
+                "business_id": invoice.business_id,
+                "customer_id": invoice.customer_id,
+                "amount": tx_amt,
+                "currency": "INR",
+                "method": tx.mode or "UPI",
+                "vpa": tx.vpa,
+                "status": "captured",
+                "raw_response": {"reconciled_txn_id": tx.txn_id, "source": tx.source},
+            },
+        )
+    except OverpaymentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     return {
         "reconciled": rec["inserted"],
         "invoice_id": str(invoice.id),

@@ -2,15 +2,18 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cores.config import settings
 from app.cores.database import get_db
-from app.models.banking_consent import PaymentWebhookEvent
+from app.cores.money import CENT, HUNDRED, ZERO, money_to_float, to_money
+from app.models.banking_consent import BankTransaction, PaymentWebhookEvent
 from app.models.business import Business
 from app.models.payment import Payment
 from app.models.transaction import Invoice
@@ -21,11 +24,12 @@ from app.schemas.payment import (
     PaymentOrderResponse,
     PaymentVerifyRequest,
 )
-from app.services.auth import get_current_user
+from app.services.auth import get_current_user, require_store_owner
 from app.services.customer_link import invoice_access_clause
 from app.services.otp import check_otp_code
 from app.services.payment import payment_service
-from app.services.payment_recorder import detect_upi_app, record_payment
+from app.services.payment_recorder import OverpaymentError, detect_upi_app, record_payment
+from app.services.unified_ledger import sync_bank_rows_to_unified
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +53,16 @@ async def create_payment_order(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found or access denied")
 
-    # Determine amount
-    amount_to_pay = (
-        payload.amount
-        if payload.amount is not None
-        else float(invoice.total_amount - invoice.paid_amount)
-    )
-    if amount_to_pay <= 0:
+    # Determine exact Decimal amount
+    due_dec = to_money(invoice.total_amount) - to_money(invoice.paid_amount or ZERO)
+    if due_dec <= ZERO:
         raise HTTPException(status_code=400, detail="Invoice is already fully paid")
+
+    amount_to_pay = to_money(payload.amount) if payload.amount is not None else due_dec
+    if amount_to_pay <= ZERO:
+        raise HTTPException(status_code=400, detail="Payment order amount must be positive")
+    if amount_to_pay > due_dec:
+        raise HTTPException(status_code=400, detail="Order amount exceeds invoice balance due")
 
     biz = (await db.execute(select(Business).where(Business.id == invoice.business_id))).scalar_one_or_none()
     order = await payment_service.create_order(
@@ -224,12 +230,12 @@ async def verify_payment(
         if str(payment_info.get("order_id") or "") != payload.order_id:
             raise HTTPException(status_code=400, detail="Gateway payment order ID mismatch")
         gw_currency = str(payment_info.get("currency") or "").upper()
-        gw_amount = float(payment_info.get("amount") or 0.0)
-        if gw_currency != "INR" or gw_amount <= 0:
+        gw_amount = to_money(payment_info.get("amount") or ZERO)
+        if gw_currency != "INR" or gw_amount <= ZERO:
             raise HTTPException(status_code=400, detail="Invalid gateway payment currency or amount")
         if (
             invoice.pending_order_amount is not None
-            and abs(gw_amount - float(invoice.pending_order_amount)) > 0.01
+            and abs(gw_amount - to_money(invoice.pending_order_amount)) > CENT
         ):
             raise HTTPException(
                 status_code=400,
@@ -237,31 +243,34 @@ async def verify_payment(
             )
         settled_amount = gw_amount
     elif invoice.pending_order_amount is not None:
-        settled_amount = float(invoice.pending_order_amount)
-    elif raw_info and "amount" in raw_info and float(raw_info["amount"]) > 0:
-        settled_amount = float(raw_info["amount"])
+        settled_amount = to_money(invoice.pending_order_amount)
+    elif raw_info and "amount" in raw_info and to_money(raw_info["amount"]) > ZERO:
+        settled_amount = to_money(raw_info["amount"])
     elif order_meta and "amount" in order_meta:
-        settled_amount = float(order_meta["amount"])
+        settled_amount = to_money(order_meta["amount"])
     else:
-        settled_amount = float(invoice.total_amount - invoice.paid_amount)
+        settled_amount = to_money(invoice.total_amount) - to_money(invoice.paid_amount or ZERO)
 
-    # Atomically record payment (single writer, ON CONFLICT DO NOTHING)
-    record_result = await record_payment(
-        db,
-        {
-            "payment_id": payload.payment_id,
-            "order_id": payload.order_id,
-            "invoice_id": invoice.id,
-            "business_id": invoice.business_id,
-            "customer_id": invoice.customer_id,
-            "amount": settled_amount,
-            "currency": "INR",
-            "method": raw_method,
-            "vpa": vpa,
-            "status": "captured",
-            "raw_response": raw_info,
-        },
-    )
+    # Atomically record payment (single writer, ON CONFLICT DO NOTHING, FOR UPDATE lock)
+    try:
+        record_result = await record_payment(
+            db,
+            {
+                "payment_id": payload.payment_id,
+                "order_id": payload.order_id,
+                "invoice_id": invoice.id,
+                "business_id": invoice.business_id,
+                "customer_id": invoice.customer_id,
+                "amount": settled_amount,
+                "currency": "INR",
+                "method": raw_method,
+                "vpa": vpa,
+                "status": "captured",
+                "raw_response": raw_info,
+            },
+        )
+    except (OverpaymentError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {
         "success": True,
@@ -357,7 +366,11 @@ async def payment_webhook(
         invoice = res.scalar_one_or_none()
 
     raw_amount = payment_obj.get("amount") or order_obj.get("amount") or 0
-    amount_in_rupees = float(raw_amount) / 100.0 if raw_amount else 0.0
+    amount_in_rupees = (
+        (Decimal(str(raw_amount)) / HUNDRED).quantize(CENT, rounding=ROUND_HALF_UP)
+        if raw_amount
+        else ZERO
+    )
 
     # 4. Handle events (payment.captured, payment.failed, order.paid)
     if event in ("payment.captured", "order.paid") or data.get("status") == "success":
@@ -375,31 +388,34 @@ async def payment_webhook(
 
             settled = (
                 amount_in_rupees
-                if amount_in_rupees > 0
+                if amount_in_rupees > ZERO
                 else (
-                    float(invoice.pending_order_amount)
+                    to_money(invoice.pending_order_amount)
                     if getattr(invoice, "pending_order_amount", None) is not None
-                    else float(invoice.total_amount) - float(invoice.paid_amount or 0.0)
+                    else to_money(invoice.total_amount) - to_money(invoice.paid_amount or ZERO)
                 )
             )
 
             # Record payment via unified single-writer
-            await record_payment(
-                db,
-                {
-                    "payment_id": payment_id,
-                    "order_id": order_id,
-                    "invoice_id": invoice.id,
-                    "business_id": invoice.business_id,
-                    "customer_id": invoice.customer_id,
-                    "amount": settled,
-                    "currency": payment_obj.get("currency") or "INR",
-                    "method": method,
-                    "vpa": vpa,
-                    "status": "captured",
-                    "raw_response": payment_obj,
-                },
-            )
+            try:
+                await record_payment(
+                    db,
+                    {
+                        "payment_id": payment_id,
+                        "order_id": order_id,
+                        "invoice_id": invoice.id,
+                        "business_id": invoice.business_id,
+                        "customer_id": invoice.customer_id,
+                        "amount": settled,
+                        "currency": payment_obj.get("currency") or "INR",
+                        "method": method,
+                        "vpa": vpa,
+                        "status": "captured",
+                        "raw_response": payment_obj,
+                    },
+                )
+            except (OverpaymentError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     elif event == "payment.failed" and invoice and getattr(invoice, "status", None) != "PAID":
         invoice.pending_order_id = None
@@ -475,7 +491,7 @@ async def get_payments_summary(
     res = await db.execute(stmt)
     payments = res.scalars().all()
 
-    total_collected = sum(p.amount for p in payments)
+    total_collected = sum((to_money(p.amount) for p in payments), ZERO)
     total_txns = len(payments)
 
     app_totals: dict[str, dict] = {}
@@ -483,47 +499,50 @@ async def get_payments_summary(
     daily_map: dict[str, dict] = {}
 
     for p in payments:
+        amt_dec = to_money(p.amount)
         app_name = p.app or detect_upi_app(p.vpa, p.method)
         method_name = p.method or "UPI"
         date_str = p.created_at.strftime("%Y-%m-%d")
 
         if app_name not in app_totals:
-            app_totals[app_name] = {"app": app_name, "amount": 0.0, "count": 0}
-        app_totals[app_name]["amount"] += p.amount
+            app_totals[app_name] = {"app": app_name, "amount": ZERO, "count": 0}
+        app_totals[app_name]["amount"] += amt_dec
         app_totals[app_name]["count"] += 1
 
         if method_name not in method_totals:
-            method_totals[method_name] = {"method": method_name, "amount": 0.0, "count": 0}
-        method_totals[method_name]["amount"] += p.amount
+            method_totals[method_name] = {"method": method_name, "amount": ZERO, "count": 0}
+        method_totals[method_name]["amount"] += amt_dec
         method_totals[method_name]["count"] += 1
 
         if date_str not in daily_map:
             daily_map[date_str] = {
                 "date": date_str,
-                "total": 0.0,
-                "google_pay": 0.0,
-                "phonepe": 0.0,
-                "paytm": 0.0,
-                "other": 0.0,
+                "total": ZERO,
+                "google_pay": ZERO,
+                "phonepe": ZERO,
+                "paytm": ZERO,
+                "other": ZERO,
                 "count": 0,
             }
-        daily_map[date_str]["total"] += p.amount
+        daily_map[date_str]["total"] += amt_dec
         daily_map[date_str]["count"] += 1
         if app_name == "Google Pay":
-            daily_map[date_str]["google_pay"] += p.amount
+            daily_map[date_str]["google_pay"] += amt_dec
         elif app_name == "PhonePe":
-            daily_map[date_str]["phonepe"] += p.amount
+            daily_map[date_str]["phonepe"] += amt_dec
         elif app_name == "Paytm":
-            daily_map[date_str]["paytm"] += p.amount
+            daily_map[date_str]["paytm"] += amt_dec
         else:
-            daily_map[date_str]["other"] += p.amount
+            daily_map[date_str]["other"] += amt_dec
 
     by_app = [
         {
             "app": k,
-            "amount": round(v["amount"], 2),
+            "amount": money_to_float(v["amount"]),
             "count": v["count"],
-            "percentage": round((v["amount"] / total_collected) * 100, 1) if total_collected > 0 else 0.0,
+            "percentage": round(float((v["amount"] / total_collected) * HUNDRED), 1)
+            if total_collected > ZERO
+            else 0.0,
         }
         for k, v in sorted(app_totals.items(), key=lambda item: item[1]["amount"], reverse=True)
     ]
@@ -531,14 +550,27 @@ async def get_payments_summary(
     by_method = [
         {
             "method": k,
-            "amount": round(v["amount"], 2),
+            "amount": money_to_float(v["amount"]),
             "count": v["count"],
-            "percentage": round((v["amount"] / total_collected) * 100, 1) if total_collected > 0 else 0.0,
+            "percentage": round(float((v["amount"] / total_collected) * HUNDRED), 1)
+            if total_collected > ZERO
+            else 0.0,
         }
         for k, v in sorted(method_totals.items(), key=lambda item: item[1]["amount"], reverse=True)
     ]
 
-    daily_series = sorted(daily_map.values(), key=lambda d: d["date"])
+    daily_series = [
+        {
+            "date": d["date"],
+            "total": money_to_float(d["total"]),
+            "google_pay": money_to_float(d["google_pay"]),
+            "phonepe": money_to_float(d["phonepe"]),
+            "paytm": money_to_float(d["paytm"]),
+            "other": money_to_float(d["other"]),
+            "count": d["count"],
+        }
+        for d in sorted(daily_map.values(), key=lambda d: d["date"])
+    ]
 
     recent_stmt = (
         select(Payment)
@@ -551,7 +583,7 @@ async def get_payments_summary(
         {
             "id": str(p.id),
             "payment_id": p.payment_id,
-            "amount": p.amount,
+            "amount": money_to_float(p.amount),
             "app": p.app or detect_upi_app(p.vpa, p.method),
             "method": p.method,
             "vpa": p.vpa,
@@ -564,10 +596,204 @@ async def get_payments_summary(
 
     return {
         "period": period,
-        "total_collected": round(total_collected, 2),
+        "total_collected": money_to_float(total_collected),
         "total_transactions": total_txns,
         "by_app": by_app,
         "by_method": by_method,
         "daily_series": daily_series,
         "recent_payments": recent_payments,
+    }
+
+
+@router.get("/gateway-status")
+async def get_payment_gateway_status(
+    _: User = Depends(get_current_user),
+):
+    """
+    Reports whether Razorpay (Live or Test keys) or local sandbox mode is active,
+    along with whether Account Aggregator is in sandbox mode.
+    """
+    gateway = (settings.PAYMENT_GATEWAY or "sandbox").strip().lower()
+    key_id = (settings.PAYMENT_KEY_ID or "").strip()
+    key_secret = (settings.PAYMENT_KEY_SECRET or "").strip()
+    razorpay_configured = gateway == "razorpay" and bool(key_id and key_secret)
+    is_live_mode = razorpay_configured and key_id.startswith("rzp_live_")
+    is_test_mode = razorpay_configured and not is_live_mode
+    aa_provider = (settings.BANK_DATA_PROVIDER or "mock").strip().lower()
+
+    return {
+        "gateway": gateway,
+        "razorpay_configured": razorpay_configured,
+        "is_live_mode": is_live_mode,
+        "is_test_mode": is_test_mode,
+        "webhook_secret_configured": bool((settings.PAYMENT_WEBHOOK_SECRET or "").strip()),
+        "webhook_endpoint": "/api/v1/payments/webhook",
+        "bank_data_provider": aa_provider,
+        "is_aa_sandbox": aa_provider != "setu_aa",
+    }
+
+
+@router.post("/sync-history")
+async def sync_razorpay_payment_history(
+    count: int = Query(default=25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_store_owner),
+):
+    """
+    Pulls recent captured Razorpay payments via REST API (`GET /v1/payments`),
+    idempotently settles matching store invoices via `record_payment`, and logs all
+    captured Razorpay inflows (including QR / Payment Links) into the unified ledger.
+    """
+    gateway = (settings.PAYMENT_GATEWAY or "sandbox").strip().lower()
+    key_id = (settings.PAYMENT_KEY_ID or "").strip()
+    key_secret = (settings.PAYMENT_KEY_SECRET or "").strip()
+    if gateway != "razorpay" or not (key_id and key_secret):
+        return {
+            "status": "sandbox_not_configured",
+            "gateway": gateway,
+            "fetched_count": 0,
+            "invoices_settled": 0,
+            "ledger_synced": 0,
+            "message": "Set PAYMENT_GATEWAY=razorpay with your Razorpay Test or Live keys in .env to pull live Razorpay payments automatically.",
+        }
+
+    try:
+        captured_items = await payment_service.list_captured_payments(count=count)
+    except (RuntimeError, ValueError, httpx.HTTPError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to fetch Razorpay payment history: {exc!s}",
+        ) from exc
+
+    owned_businesses = (
+        await db.execute(select(Business.id).where(Business.owner_id == user.id))
+    ).scalars().all()
+
+    invoices_settled = 0
+    ledger_rows: list[dict] = []
+
+    for item in captured_items:
+        pid = item.get("payment_id")
+        if not pid:
+            continue
+        amt_dec = to_money(item["amount"])
+        order_id = item.get("order_id")
+        notes = item.get("notes") or {}
+        method = str(item.get("method") or "UPI").upper()
+        vpa = item.get("vpa")
+        app_name = detect_upi_app(vpa, method)
+        created_ts = item.get("created_at")
+        occurred_at = (
+            datetime.fromtimestamp(int(created_ts), tz=UTC)
+            if isinstance(created_ts, (int, float)) and created_ts > 0
+            else datetime.now(UTC)
+        )
+
+        # 1. Try settling a matching owned invoice (by notes.invoice_id or pending_order_id)
+        matched_invoice: Invoice | None = None
+        if owned_businesses:
+            note_inv_id = notes.get("invoice_id")
+            if note_inv_id:
+                try:
+                    inv_uuid = uuid.UUID(str(note_inv_id))
+                    matched_invoice = (
+                        await db.execute(
+                            select(Invoice).where(
+                                Invoice.id == inv_uuid,
+                                Invoice.business_id.in_(owned_businesses),
+                            )
+                        )
+                    ).scalar_one_or_none()
+                except ValueError:
+                    matched_invoice = None
+            if matched_invoice is None and order_id:
+                matched_invoice = (
+                    await db.execute(
+                        select(Invoice).where(
+                            Invoice.pending_order_id == order_id,
+                            Invoice.business_id.in_(owned_businesses),
+                        )
+                    )
+                ).scalar_one_or_none()
+
+        if matched_invoice is not None:
+            try:
+                rec = await record_payment(
+                    db,
+                    {
+                        "payment_id": pid,
+                        "order_id": order_id,
+                        "invoice_id": matched_invoice.id,
+                        "business_id": matched_invoice.business_id,
+                        "customer_id": matched_invoice.customer_id,
+                        "amount": amt_dec,
+                        "currency": item.get("currency", "INR"),
+                        "method": method,
+                        "vpa": vpa,
+                        "status": "captured",
+                        "raw_response": {"source": "razorpay_sync", "order_id": order_id},
+                    },
+                )
+                if rec.get("inserted"):
+                    invoices_settled += 1
+            except (OverpaymentError, ValueError):
+                logger.info("Skipped invoice auto-settlement for Razorpay payment %s (already paid or mismatch)", pid)
+
+        # 2. Idempotently persist every captured Razorpay inflow into bank_transactions + unified ledger
+        txn_id = f"rzp:{pid}"[:120]
+        counterparty = str(vpa or item.get("email") or item.get("contact") or "Razorpay Customer")[:150]
+        narration = (
+            item.get("description")
+            or f"Razorpay {method} collection ({pid})"
+        )
+        stmt = (
+            pg_insert(BankTransaction)
+            .values(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                txn_id=txn_id,
+                timestamp=occurred_at,
+                date=occurred_at.date().isoformat(),
+                amount=amt_dec,
+                type="CREDIT",
+                mode=method[:30],
+                app=app_name[:50],
+                vpa=vpa[:150] if vpa else None,
+                narration=narration,
+                category="Business Sales Settlement",
+                counterparty=counterparty,
+                masked_acc="Razorpay Merchant",
+                source="razorpay_sync",
+                created_at=datetime.now(UTC),
+            )
+            .on_conflict_do_nothing(constraint="uq_bank_transactions_user_txn")
+        )
+        await db.execute(stmt)
+        ledger_rows.append(
+            {
+                "txn_id": txn_id,
+                "timestamp": occurred_at,
+                "amount": amt_dec,
+                "type": "CREDIT",
+                "mode": method,
+                "app": app_name,
+                "narration": narration,
+                "category": "Business & MSME",
+                "subcategory": "Retail Store Sale",
+                "counterparty": counterparty,
+                "source": "razorpay_sync",
+            }
+        )
+
+    if ledger_rows:
+        await sync_bank_rows_to_unified(db, user.id, ledger_rows, commit=False)
+        await db.commit()
+
+    return {
+        "status": "synced",
+        "gateway": gateway,
+        "fetched_count": len(captured_items),
+        "invoices_settled": invoices_settled,
+        "ledger_synced": len(ledger_rows),
+        "message": f"Synced {len(captured_items)} captured Razorpay payment(s) ({invoices_settled} invoice(s) settled).",
     }

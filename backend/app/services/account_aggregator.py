@@ -18,12 +18,14 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cores.config import settings
+from app.cores.money import HUNDRED, ZERO, to_money
 from app.models.banking_consent import BankingConsent, BankTransaction
 from app.models.user import User
 from app.schemas.banking import (
@@ -344,7 +346,7 @@ class AccountAggregatorService:
                         "txn_id": r.txn_id,
                         "timestamp": r.timestamp.isoformat(),
                         "date": r.date,
-                        "amount": float(r.amount),
+                        "amount": to_money(r.amount),
                         "mode": r.mode,
                         "type": "CREDIT",
                         "narration": r.narration,
@@ -380,35 +382,38 @@ class AccountAggregatorService:
                     "debit_risk": "0.0% (Cryptographically impossible to debit account)",
                     "active_fip": consent.fip_name if consent else "Not connected yet",
                     "masked_account": consent.masked_acc if consent else "Not linked",
+                    "data_mode": "SANDBOX_SAMPLE" if settings.BANK_DATA_PROVIDER.strip().lower() != "setu_aa" else "LIVE_SETU_AA",
                 },
             )
         df = pd.DataFrame(raw_inflows)
 
-        total_income = round(float(df["amount"].sum()), 2)
-        total_count = len(df)
-        avg_ticket = round(total_income / max(total_count, 1), 2)
+        total_income = sum((to_money(r["amount"]) for r in raw_inflows), ZERO)
+        total_count = len(raw_inflows)
+        avg_ticket = to_money(total_income / Decimal(max(total_count, 1))) if total_count else ZERO
 
-        # Monthly aggregation using pandas
+        # Monthly aggregation using exact Decimal sums
         df["month"] = pd.to_datetime(df["timestamp"]).dt.strftime("%Y-%m")
         monthly_trend: list[MonthlyIncomePoint] = []
         for m_str, m_grp in df.groupby("month", sort=True):
+            m_sum = sum((to_money(v) for v in m_grp["amount"]), ZERO)
             monthly_trend.append(
                 MonthlyIncomePoint(
                     month=str(m_str),
-                    total_income=round(float(m_grp["amount"].sum()), 2),
+                    total_income=m_sum,
                     transaction_count=len(m_grp),
                 )
             )
 
-        # Category breakdown
+        # Category breakdown using exact Decimal sums
         cat_breakdown: list[IncomeCategoryBreakdown] = []
+        denom_inc = total_income if total_income > ZERO else Decimal("1.00")
         for cat_name, c_grp in df.groupby("category", sort=False):
-            c_sum = round(float(c_grp["amount"].sum()), 2)
+            c_sum = sum((to_money(v) for v in c_grp["amount"]), ZERO)
             cat_breakdown.append(
                 IncomeCategoryBreakdown(
                     category=str(cat_name),
                     total_amount=c_sum,
-                    percentage=round((c_sum / max(total_income, 1.0)) * 100.0, 1),
+                    percentage=round(float((c_sum / denom_inc) * HUNDRED), 1),
                     count=len(c_grp),
                 )
             )
@@ -430,11 +435,16 @@ class AccountAggregatorService:
                 "data_channel": (
                     "RBI Account Aggregator (FIP -> Sahamati AA -> FIU)"
                     if consent
-                    else "Statement Import / UPI Push Bridge"
+                    else "Statement Import / Razorpay / UPI Push Bridge"
                 ),
                 "debit_risk": "0.0% (Cryptographically impossible to debit account)",
-                "active_fip": consent.fip_name if consent else "Imported Bank / UPI Credits",
+                "active_fip": consent.fip_name if consent else "Imported Bank / Razorpay / UPI Credits",
                 "masked_account": consent.masked_acc if consent else "Account Masked",
+                "data_mode": (
+                    "LIVE_SETU_AA"
+                    if isinstance(provider, SetuAAProvider)
+                    else ("SANDBOX_SAMPLE" if (consent and not db_credits) else "LIVE_IMPORTED")
+                ),
             },
         )
 

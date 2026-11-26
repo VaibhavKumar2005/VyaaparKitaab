@@ -23,6 +23,7 @@ import subprocess
 import uuid
 import zlib
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 from typing import Any
 
@@ -34,6 +35,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.cores.money import HUNDRED, ZERO, money_to_float, to_money
 from app.models.banking_consent import BankTransaction
 from app.models.unified_transaction import UnifiedTransaction
 from app.services.classifier import (
@@ -47,20 +49,25 @@ from app.services.unified_ledger import sync_bank_rows_to_unified
 _VPA_REGEX = re.compile(r"([a-zA-Z0-9.\-_]{2,64}@[a-zA-Z0-9.\-]{2,32})")
 
 
-def _clean_amount(raw: Any) -> float:
-    if raw is None:
-        return 0.0
-    if isinstance(raw, (int, float)):
-        return abs(float(raw))
+def _clean_amount(raw: Any) -> Decimal:
+    if raw is None or isinstance(raw, bool):
+        return ZERO
+    if isinstance(raw, (Decimal, int, float)):
+        try:
+            return abs(to_money(raw))
+        except ValueError:
+            return ZERO
     s = str(raw).strip()
     if not s or s in ("-", "—", "null", "None", "NaN"):
-        return 0.0
+        return ZERO
     # Strip currency symbols, commas, Cr/Dr suffixes
     s = re.sub(r"(?i)(inr|rs\.?|₹|,|\s|cr|dr|\+)", "", s)
+    if not s or s in ("-", "."):
+        return ZERO
     try:
-        return abs(float(s))
-    except ValueError:
-        return 0.0
+        return abs(to_money(Decimal(s)))
+    except (InvalidOperation, ValueError):
+        return ZERO
 
 
 def _parse_date(raw: Any) -> tuple[datetime, str]:
@@ -243,10 +250,10 @@ def _normalize_row(raw_row: dict[str, Any], index: int) -> dict[str, Any] | None
     ).strip().upper()
     raw_amount_val = row.get("amount") or row.get("transaction_amount") or row.get("value")
 
-    if debit_val > 0 and credit_val == 0:
+    if debit_val > ZERO and credit_val == ZERO:
         amount = debit_val
         tx_type = "DEBIT"
-    elif credit_val > 0 and debit_val == 0:
+    elif credit_val > ZERO and debit_val == ZERO:
         amount = credit_val
         tx_type = "CREDIT"
     else:
@@ -267,7 +274,7 @@ def _normalize_row(raw_row: dict[str, Any], index: int) -> dict[str, Any] | None
         else:
             tx_type = "DEBIT"
 
-    if amount <= 0:
+    if amount <= ZERO:
         return None
 
     if not narration:
@@ -340,7 +347,7 @@ def _normalize_row(raw_row: dict[str, Any], index: int) -> dict[str, Any] | None
         "txn_id": raw_txn_id[:120],
         "timestamp": dt,
         "date": date_str,
-        "amount": round(amount, 2),
+        "amount": to_money(amount),
         "type": tx_type,
         "mode": mode[:30],
         "app": app_name[:50],
@@ -972,6 +979,7 @@ async def import_statement_transactions(
     debits_count = 0
 
     for item in parsed_rows:
+        amt_dec = to_money(item["amount"])
         if item["type"] == "CREDIT":
             credits_count += 1
         else:
@@ -985,7 +993,7 @@ async def import_statement_transactions(
                 txn_id=item["txn_id"],
                 timestamp=item["timestamp"],
                 date=item["date"],
-                amount=item["amount"],
+                amount=amt_dec,
                 type=item["type"],
                 mode=item["mode"],
                 app=item["app"],
@@ -1000,7 +1008,7 @@ async def import_statement_transactions(
             .on_conflict_do_update(
                 constraint="uq_bank_transactions_user_txn",
                 set_={
-                    "amount": item["amount"],
+                    "amount": amt_dec,
                     "type": item["type"],
                     "mode": item["mode"],
                     "app": item["app"],
@@ -1040,8 +1048,8 @@ async def get_personal_spending_analytics(
     )
     rows = res.scalars().all()
 
-    total_spent = 0.0
-    total_received = 0.0
+    total_spent = ZERO
+    total_received = ZERO
     debits_count = 0
     credits_count = 0
 
@@ -1051,38 +1059,39 @@ async def get_personal_spending_analytics(
     transactions_out: list[dict[str, Any]] = []
 
     for r in rows:
+        amt_dec = to_money(r.amount)
         month_key = r.date[:7] if r.date and len(r.date) >= 7 else r.timestamp.strftime("%Y-%m")
         if month_key not in by_month:
-            by_month[month_key] = {"month": month_key, "spent": 0.0, "received": 0.0, "count": 0}
+            by_month[month_key] = {"month": month_key, "spent": ZERO, "received": ZERO, "count": 0}
         by_month[month_key]["count"] += 1
 
         if r.type == "DEBIT":
-            total_spent += r.amount
+            total_spent += amt_dec
             debits_count += 1
-            by_month[month_key]["spent"] = round(by_month[month_key]["spent"] + r.amount, 2)
+            by_month[month_key]["spent"] += amt_dec
 
             cat = r.category or "General"
             if cat not in by_category:
-                by_category[cat] = {"category": cat, "amount": 0.0, "count": 0}
-            by_category[cat]["amount"] = round(by_category[cat]["amount"] + r.amount, 2)
+                by_category[cat] = {"category": cat, "amount": ZERO, "count": 0}
+            by_category[cat]["amount"] += amt_dec
             by_category[cat]["count"] += 1
 
             app_key = r.app or "UPI"
             if app_key not in by_app:
-                by_app[app_key] = {"app": app_key, "amount": 0.0, "count": 0}
-            by_app[app_key]["amount"] = round(by_app[app_key]["amount"] + r.amount, 2)
+                by_app[app_key] = {"app": app_key, "amount": ZERO, "count": 0}
+            by_app[app_key]["amount"] += amt_dec
             by_app[app_key]["count"] += 1
         else:
-            total_received += r.amount
+            total_received += amt_dec
             credits_count += 1
-            by_month[month_key]["received"] = round(by_month[month_key]["received"] + r.amount, 2)
+            by_month[month_key]["received"] += amt_dec
 
         transactions_out.append(
             {
                 "txn_id": r.txn_id,
                 "timestamp": r.timestamp.isoformat(),
                 "date": r.date,
-                "amount": round(r.amount, 2),
+                "amount": money_to_float(amt_dec),
                 "type": r.type,
                 "mode": r.mode,
                 "app": r.app,
@@ -1119,21 +1128,42 @@ async def get_personal_spending_analytics(
     ]
     _, hierarchy_tree = build_category_tree(debit_tree_records)
 
-    cat_list = sorted(by_category.values(), key=lambda x: x["amount"], reverse=True)
-    for c in cat_list:
-        c["percentage"] = round((c["amount"] / max(total_spent, 1.0)) * 100.0, 1)
+    spent_denom = total_spent if total_spent > ZERO else Decimal("1.00")
+    cat_list = [
+        {
+            "category": c["category"],
+            "amount": money_to_float(c["amount"]),
+            "count": c["count"],
+            "percentage": round(float((c["amount"] / spent_denom) * HUNDRED), 1),
+        }
+        for c in sorted(by_category.values(), key=lambda x: x["amount"], reverse=True)
+    ]
 
-    app_list = sorted(by_app.values(), key=lambda x: x["amount"], reverse=True)
-    for a in app_list:
-        a["percentage"] = round((a["amount"] / max(total_spent, 1.0)) * 100.0, 1)
+    app_list = [
+        {
+            "app": a["app"],
+            "amount": money_to_float(a["amount"]),
+            "count": a["count"],
+            "percentage": round(float((a["amount"] / spent_denom) * HUNDRED), 1),
+        }
+        for a in sorted(by_app.values(), key=lambda x: x["amount"], reverse=True)
+    ]
 
-    month_list = sorted(by_month.values(), key=lambda x: x["month"])
+    month_list = [
+        {
+            "month": m["month"],
+            "spent": money_to_float(m["spent"]),
+            "received": money_to_float(m["received"]),
+            "count": m["count"],
+        }
+        for m in sorted(by_month.values(), key=lambda x: x["month"])
+    ]
 
     return {
         "has_imported_data": len(rows) > 0,
-        "total_spent": round(total_spent, 2),
-        "total_received": round(total_received, 2),
-        "net_cashflow": round(total_received - total_spent, 2),
+        "total_spent": money_to_float(total_spent),
+        "total_received": money_to_float(total_received),
+        "net_cashflow": money_to_float(total_received - total_spent),
         "debits_count": debits_count,
         "credits_count": credits_count,
         "category_breakdown": cat_list,

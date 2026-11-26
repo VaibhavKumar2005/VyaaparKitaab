@@ -9,6 +9,7 @@ from sqlalchemy import delete, desc, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.cores.money import ZERO, money_to_float, to_money
 from app.models.banking_consent import BankTransaction
 from app.models.business import Business, Product
 from app.models.purchase import PersonalPurchase
@@ -41,7 +42,7 @@ async def upsert_unified_transaction(
     direction = str(record.get("direction", "DEBIT")).upper()[:16]
     counterparty = str(record.get("counterparty") or "Merchant")[:180]
     narration = str(record.get("narration") or "")
-    amount = round(float(record.get("amount", 0.0)), 2)
+    amount = to_money(record.get("amount", ZERO))
 
     cat, subcat, cls_source = classify_hierarchical(
         text=narration,
@@ -63,9 +64,9 @@ async def upsert_unified_transaction(
         "direction": direction,
         "side": str(record.get("side") or "CUSTOMER").upper()[:16],
         "amount": amount,
-        "paid_amount": round(float(record.get("paid_amount", amount)), 2),
-        "discount_amount": round(max(float(record.get("discount_amount", 0.0) or 0.0), 0.0), 2),
-        "tax_amount": round(max(float(record.get("tax_amount", 0.0) or 0.0), 0.0), 2),
+        "paid_amount": to_money(record.get("paid_amount", amount)),
+        "discount_amount": max(to_money(record.get("discount_amount", ZERO) or ZERO), ZERO),
+        "tax_amount": max(to_money(record.get("tax_amount", ZERO) or ZERO), ZERO),
         "currency": str(record.get("currency") or "INR")[:10],
         "status": str(record.get("status") or "RECORDED").upper()[:30],
         "channel": str(record.get("channel") or "UPI").upper()[:40],
@@ -154,7 +155,7 @@ async def sync_invoice_to_unified(
         text=narration,
         counterparty=resolved_store_name,
         direction=direction,
-        amount=float(invoice.total_amount or 0.0),
+        amount=to_money(invoice.total_amount or ZERO),
         source_type=source_type,
     )
 
@@ -169,10 +170,10 @@ async def sync_invoice_to_unified(
             "source_ref_id": f"inv:{invoice.id}",
             "direction": direction,
             "side": side,
-            "amount": float(invoice.total_amount or 0.0),
-            "paid_amount": float(invoice.paid_amount or 0.0),
-            "discount_amount": float(invoice.discount_amount or 0.0),
-            "tax_amount": float(invoice.tax_amount or 0.0),
+            "amount": to_money(invoice.total_amount or ZERO),
+            "paid_amount": to_money(invoice.paid_amount or ZERO),
+            "discount_amount": to_money(invoice.discount_amount or ZERO),
+            "tax_amount": to_money(invoice.tax_amount or ZERO),
             "currency": "INR",
             "status": invoice.status or "DRAFT",
             "channel": invoice.payment_method or "UPI",
@@ -220,7 +221,7 @@ async def sync_personal_purchase_to_unified(
         text=combined_note,
         counterparty=purchase.marketplace,
         direction="DEBIT",
-        amount=float(purchase.amount),
+        amount=to_money(purchase.amount),
         explicit_category=purchase.category,
         explicit_subcategory=subcategory,
         source_type="personal_purchase",
@@ -247,10 +248,10 @@ async def sync_personal_purchase_to_unified(
             "source_ref_id": f"purchase:{purchase.id}",
             "direction": "DEBIT",
             "side": "CUSTOMER",
-            "amount": float(purchase.amount),
-            "paid_amount": float(purchase.amount),
-            "discount_amount": 0.0,
-            "tax_amount": 0.0,
+            "amount": to_money(purchase.amount),
+            "paid_amount": to_money(purchase.amount),
+            "discount_amount": ZERO,
+            "tax_amount": ZERO,
             "currency": purchase.currency or "INR",
             "status": "RECORDED",
             "channel": channel,
@@ -288,10 +289,10 @@ async def sync_bank_rows_to_unified(
                 "source_ref_id": f"bank:{user_id}:{item['txn_id']}",
                 "direction": str(item.get("type", "DEBIT")).upper(),
                 "side": "CUSTOMER",
-                "amount": float(item["amount"]),
-                "paid_amount": float(item["amount"]),
-                "discount_amount": float(item.get("discount_amount", 0.0) or 0.0),
-                "tax_amount": 0.0,
+                "amount": to_money(item["amount"]),
+                "paid_amount": to_money(item["amount"]),
+                "discount_amount": to_money(item.get("discount_amount", ZERO) or ZERO),
+                "tax_amount": ZERO,
                 "currency": "INR",
                 "status": "RECORDED",
                 "channel": str(item.get("mode", "UPI")).upper(),
@@ -366,7 +367,7 @@ async def backfill_user_unified_ledger(db: AsyncSession, user: User) -> None:
                 {
                     "txn_id": b.txn_id,
                     "timestamp": b.timestamp,
-                    "amount": float(b.amount),
+                    "amount": to_money(b.amount),
                     "type": b.type,
                     "mode": b.mode,
                     "app": b.app,
@@ -469,16 +470,16 @@ async def query_unified_transactions(
     ).scalars().all()
 
     total_count = len(all_rows)
-    total_discount = round(sum(float(r.discount_amount) for r in all_rows), 2)
-    total_debits = round(sum(float(r.amount) for r in all_rows if r.direction == "DEBIT"), 2)
-    total_credits = round(sum(float(r.amount) for r in all_rows if r.direction == "CREDIT"), 2)
+    total_discount_dec = sum((to_money(r.discount_amount) for r in all_rows), ZERO)
+    total_debits_dec = sum((to_money(r.amount) for r in all_rows if r.direction == "DEBIT"), ZERO)
+    total_credits_dec = sum((to_money(r.amount) for r in all_rows if r.direction == "CREDIT"), ZERO)
 
     is_customer_spend_view = (view or "all").lower() == "customer" and (direction or "").upper() != "CREDIT"
     summary_rows = [r for r in all_rows if r.direction == "DEBIT"] if is_customer_spend_view else all_rows
-    total_amount = round(sum(float(r.amount) for r in summary_rows), 2)
+    total_amount_dec = sum((to_money(r.amount) for r in summary_rows), ZERO)
 
     tree_records = [
-        {"category": r.category, "subcategory": r.subcategory, "amount": float(r.amount)}
+        {"category": r.category, "subcategory": r.subcategory, "amount": to_money(r.amount)}
         for r in summary_rows
     ]
     nested_summary, hierarchy_breakdown = build_category_tree(tree_records)
@@ -494,10 +495,10 @@ async def query_unified_transactions(
             "customer_id": str(r.customer_id) if r.customer_id else None,
             "direction": r.direction,
             "side": r.side,
-            "amount": round(float(r.amount), 2),
-            "paid_amount": round(float(r.paid_amount), 2),
-            "discount_amount": round(float(r.discount_amount), 2),
-            "tax_amount": round(float(r.tax_amount), 2),
+            "amount": money_to_float(r.amount),
+            "paid_amount": money_to_float(r.paid_amount),
+            "discount_amount": money_to_float(r.discount_amount),
+            "tax_amount": money_to_float(r.tax_amount),
             "currency": r.currency,
             "status": r.status,
             "channel": r.channel,
@@ -514,10 +515,10 @@ async def query_unified_transactions(
 
     return {
         "total_count": total_count,
-        "total_amount": total_amount,
-        "total_discount_saved": total_discount,
-        "total_debits": total_debits,
-        "total_credits": total_credits,
+        "total_amount": money_to_float(total_amount_dec),
+        "total_discount_saved": money_to_float(total_discount_dec),
+        "total_debits": money_to_float(total_debits_dec),
+        "total_credits": money_to_float(total_credits_dec),
         "nested_summary": nested_summary,
         "category_tree": hierarchy_breakdown,
         "items": items,

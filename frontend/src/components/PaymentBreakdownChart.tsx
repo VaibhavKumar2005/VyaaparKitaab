@@ -9,8 +9,12 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from 'recharts';
-import { Smartphone, Zap, CheckCircle2, ShieldCheck, ArrowUpRight } from 'lucide-react';
-import { usePaymentSummary } from '../hooks/usePayments';
+import { CheckCircle2, RefreshCw, Zap } from 'lucide-react';
+import {
+  usePaymentGatewayStatus,
+  usePaymentSummary,
+  useSyncRazorpayHistory,
+} from '../hooks/usePayments';
 import { formatINR, formatINRPrecise } from '../lib/format';
 import { LoadingState } from './ui/LoadingState';
 
@@ -25,7 +29,10 @@ const APP_COLORS: Record<string, string> = {
 
 export function PaymentBreakdownChart() {
   const [period, setPeriod] = useState<string>('30d');
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const { data, isLoading } = usePaymentSummary(period);
+  const { data: gwStatus } = usePaymentGatewayStatus();
+  const syncMutation = useSyncRazorpayHistory();
 
   if (isLoading || !data) {
     return <LoadingState label="Loading payment and UPI collection analytics…" />;
@@ -36,26 +43,57 @@ export function PaymentBreakdownChart() {
   const gpayItem = by_app.find((a) => a.app === 'Google Pay');
   const phonepeItem = by_app.find((a) => a.app === 'PhonePe');
   const paytmItem = by_app.find((a) => a.app === 'Paytm');
-  const otherItem = by_app.filter((a) => !['Google Pay', 'PhonePe', 'Paytm'].includes(a.app));
-  const otherTotal = otherItem.reduce((sum, a) => sum + a.amount, 0);
+
+  const gatewayBadge = gwStatus?.is_live_mode
+    ? { label: 'Razorpay Live', cls: 'bg-emerald-50 text-emerald-800 border-emerald-200' }
+    : gwStatus?.is_test_mode
+      ? { label: 'Razorpay Test Mode', cls: 'bg-blue-50 text-blue-800 border-blue-200' }
+      : { label: 'Razorpay Sandbox', cls: 'bg-amber-50 text-amber-900 border-amber-200' };
+
+  const handleSyncRazorpay = () => {
+    setSyncNotice(null);
+    syncMutation.mutate(25, {
+      onSuccess: (res) => {
+        setSyncNotice(res.message);
+        setTimeout(() => setSyncNotice(null), 6000);
+      },
+      onError: (err) => {
+        setSyncNotice(err instanceof Error ? err.message : 'Razorpay sync failed');
+        setTimeout(() => setSyncNotice(null), 6000);
+      },
+    });
+  };
 
   return (
     <div className="rounded-lg border border-rule bg-white p-5 space-y-6">
       {/* ─── Header & Period Selector ─── */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule pb-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-lg font-bold text-ink">UPI & Gateway Collections</h2>
             <span className="rounded bg-navy-tint px-2 py-0.5 text-[10px] font-bold text-primary flex items-center gap-1">
               <Zap className="h-3 w-3" /> Real-time Ingestion
             </span>
+            <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${gatewayBadge.cls}`}>
+              {gatewayBadge.label}
+            </span>
           </div>
           <p className="mt-0.5 text-xs text-ink-soft">
-            Live transactions categorized by customer payment app (Google Pay, PhonePe, Paytm, etc.)
+            Live Razorpay &amp; UPI collections categorized by customer payment app (Google Pay, PhonePe, Paytm)
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSyncRazorpay}
+            disabled={syncMutation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-md border border-navy/30 bg-navy-tint px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy hover:text-white transition-colors disabled:opacity-50"
+            title="Pull recent captured payments directly from Razorpay REST API"
+          >
+            <RefreshCw className={`h-3 w-3 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
+            {syncMutation.isPending ? 'Syncing…' : 'Sync Razorpay'}
+          </button>
           <span className="text-xs text-ink-nav">Period:</span>
           {(['7d', '30d', 'all'] as const).map((p) => (
             <button
@@ -73,6 +111,12 @@ export function PaymentBreakdownChart() {
           ))}
         </div>
       </div>
+
+      {syncNotice && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-900">
+          {syncNotice}
+        </div>
+      )}
 
       {/* ─── Key UPI Metrics Cards ─── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

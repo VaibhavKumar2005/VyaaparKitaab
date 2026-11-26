@@ -1,7 +1,8 @@
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -87,7 +88,7 @@ class BankTransaction(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
     date: Mapped[str] = mapped_column(String(20), nullable=False)
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     type: Mapped[str] = mapped_column(String(20), nullable=False, default="DEBIT")  # CREDIT or DEBIT
     mode: Mapped[str] = mapped_column(String(30), nullable=False, default="UPI")
     app: Mapped[str] = mapped_column(String(50), nullable=False, default="UPI")

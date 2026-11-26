@@ -13,7 +13,10 @@ class Settings(BaseSettings):
     )
 
     DATABASE_URL: str = Field(default="postgresql://postgres@localhost:5432/vyaapardb")
+    DATABASE_DIRECT_URL: str = Field(default="")
     DB_SSL_VERIFY: bool = Field(default=True)
+    EVENT_BUS_BACKEND: str = Field(default="memory")  # "memory" or "postgres"
+    EVENT_BUS_CHANNEL: str = Field(default="vk_events")
     SECRET_KEY: str = Field(default="change-me-to-a-secure-random-key")
     ENCRYPTION_KEY: str = Field(default="")
     ENV: str = Field(default="development")

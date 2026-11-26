@@ -22,8 +22,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cores.database import SessionLocal
+from app.cores.money import money_to_float, to_money
 from app.models.banking_consent import BankTransaction
 from app.services.event_bus import publish_event
+from app.services.unified_ledger import sync_bank_rows_to_unified
 
 logger = logging.getLogger(__name__)
 
@@ -86,24 +88,77 @@ SIMULATED_TEMPLATES: list[dict[str, Any]] = [
     },
 ]
 
+SIMULATED_DEBIT_TEMPLATES: list[dict[str, Any]] = [
+    {
+        "base_amount": 1850.0,
+        "app": "Google Pay",
+        "counterparty": "Metro Wholesale Distributors",
+        "vpa": "metro.wholesale@okicici",
+        "category": "Wholesale Inventory",
+        "narration": "UPI/DR/510293847111/Metro Wholesale/Stock Restock",
+    },
+    {
+        "base_amount": 640.0,
+        "app": "PhonePe",
+        "counterparty": "IndianOil Fuel Station",
+        "vpa": "indianoil@ybl",
+        "category": "Travel & Fuel",
+        "narration": "UPI/DR/510293847222/IndianOil/Delivery Scooter Petrol",
+    },
+    {
+        "base_amount": 1290.0,
+        "app": "Paytm",
+        "counterparty": "Tata Power Electricity",
+        "vpa": "tatapower@paytm",
+        "category": "Bills & Utilities",
+        "narration": "UPI/DR/510293847333/Tata Power/Shop Electricity Bill",
+    },
+    {
+        "base_amount": 420.0,
+        "app": "Google Pay",
+        "counterparty": "Swiggy Food Delivery",
+        "vpa": "swiggy@okaxis",
+        "category": "Food & Dining",
+        "narration": "UPI/DR/510293847444/Swiggy/Staff Lunch Order",
+    },
+    {
+        "base_amount": 999.0,
+        "app": "PhonePe",
+        "counterparty": "Jio Fiber Broadband",
+        "vpa": "jiofiber@ibl",
+        "category": "Bills & Utilities",
+        "narration": "UPI/DR/510293847555/Jio Fiber/Store WiFi Recharge",
+    },
+]
+
 
 async def emit_simulated_credit(
     db: AsyncSession,
     user_id: uuid.UUID,
     template_override: dict[str, Any] | None = None,
+    direction: str = "CREDIT",
 ) -> dict[str, Any]:
     """
-    Generates a single realistic bank credit transaction, saves it to PostgreSQL,
-    and publishes the `bank.credit.received` event across SSE.
+    Generates a single realistic sandbox bank transaction (CREDIT or DEBIT), saves it
+    to PostgreSQL (`bank_transactions` + `unified_transactions`), and publishes the event on SSE.
     """
     now = datetime.now(UTC)
-    template = template_override or random.choice(SIMULATED_TEMPLATES)
+    resolved_dir = direction.strip().upper()
+    if resolved_dir == "AUTO":
+        resolved_dir = "DEBIT" if random.random() < 0.35 else "CREDIT"
+    if resolved_dir not in ("CREDIT", "DEBIT"):
+        resolved_dir = "CREDIT"
+
+    pool = SIMULATED_DEBIT_TEMPLATES if resolved_dir == "DEBIT" else SIMULATED_TEMPLATES
+    template = template_override or random.choice(pool)
 
     # Slight random variation in amount for realism (e.g. ± ₹10 to ₹50)
     variance = random.choice([-30, -15, 0, 15, 30, 50])
-    amount = max(100.0, float(template["base_amount"] + variance))
+    amount_dec = max(to_money(100), to_money(template["base_amount"]) + to_money(variance))
+    amount = money_to_float(amount_dec)
 
-    txn_id = f"aa_demo_{now.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:6]}"
+    prefix = "aa_demo_dr" if resolved_dir == "DEBIT" else "aa_demo"
+    txn_id = f"{prefix}_{now.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:6]}"
     date_str = now.date().isoformat()
     masked_acc = "XXXX-XXXX-4821"
 
@@ -115,8 +170,8 @@ async def emit_simulated_credit(
             txn_id=txn_id,
             timestamp=now,
             date=date_str,
-            amount=amount,
-            type="CREDIT",
+            amount=amount_dec,
+            type=resolved_dir,
             mode="UPI",
             app=template["app"],
             vpa=template.get("vpa"),
@@ -130,14 +185,34 @@ async def emit_simulated_credit(
         .on_conflict_do_nothing(index_elements=["user_id", "txn_id"])
     )
     await db.execute(stmt)
+    await sync_bank_rows_to_unified(
+        db,
+        user_id,
+        [
+            {
+                "txn_id": txn_id,
+                "timestamp": now,
+                "amount": amount_dec,
+                "type": resolved_dir,
+                "mode": "UPI",
+                "app": template["app"],
+                "narration": template["narration"],
+                "category": template["category"],
+                "counterparty": template["counterparty"],
+                "source": "aa_sandbox",
+            }
+        ],
+        commit=False,
+    )
     await db.commit()
 
+    event_name = "bank.debit.received" if resolved_dir == "DEBIT" else "bank.credit.received"
     event_payload = {
-        "event": "bank.credit.received",
+        "event": event_name,
         "txn_id": txn_id,
         "amount": amount,
         "currency": "INR",
-        "type": "CREDIT",
+        "type": resolved_dir,
         "mode": "UPI",
         "app": template["app"],
         "vpa": template.get("vpa"),
@@ -151,17 +226,18 @@ async def emit_simulated_credit(
 
     # Broadcast to current user's SSE payment/bank stream
     await publish_event(
-        event_type="bank.credit.received",
+        event_type=event_name,
         data=event_payload,
         customer_id=str(user_id),
         event_id=f"evt_{txn_id}",
     )
 
     logger.info(
-        "Emitted simulated bank credit: user=%s, txn_id=%s, amount=%.2f, app=%s",
+        "Emitted simulated bank %s: user=%s, txn_id=%s, amount=%s, app=%s",
+        resolved_dir,
         user_id,
         txn_id,
-        amount,
+        amount_dec,
         template["app"],
     )
     return event_payload
@@ -199,7 +275,7 @@ class BankStreamSimulatorManager:
             while True:
                 await asyncio.sleep(interval_seconds)
                 async with SessionLocal() as db:
-                    payload = await emit_simulated_credit(db, user_id)
+                    payload = await emit_simulated_credit(db, user_id, direction="AUTO")
                     stats = self._stats.setdefault(
                         uid,
                         {

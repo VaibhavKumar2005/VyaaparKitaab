@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
@@ -53,10 +54,10 @@ class UnifiedTransaction(Base):
     direction: Mapped[str] = mapped_column(String(16), nullable=False, default="DEBIT")
     side: Mapped[str] = mapped_column(String(16), nullable=False, default="CUSTOMER")
 
-    amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
-    paid_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0.0)
-    discount_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0.0)
-    tax_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0.0)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    paid_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
     currency: Mapped[str] = mapped_column(String(10), nullable=False, default="INR")
 
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="RECORDED")
@@ -117,8 +118,8 @@ class CustomerNotification(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
 
-    amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0.0)
-    discount_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0.0)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
     category: Mapped[str] = mapped_column(String(80), nullable=False, default="Other")
     subcategory: Mapped[str] = mapped_column(String(80), nullable=False, default="General")
     payment_channel: Mapped[str | None] = mapped_column(String(50), nullable=True)

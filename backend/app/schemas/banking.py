@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.cores.money import Money
+
 
 class BankingConsentRequest(BaseModel):
     fip_id: str = Field(
@@ -56,7 +58,7 @@ class IncomeTransactionItem(BaseModel):
     txn_id: str
     timestamp: str
     date: str
-    amount: float
+    amount: Money
     mode: str  # UPI, IMPS, NEFT, RTGS
     type: str = "CREDIT"
     narration: str
@@ -67,13 +69,13 @@ class IncomeTransactionItem(BaseModel):
 
 class MonthlyIncomePoint(BaseModel):
     month: str
-    total_income: float
+    total_income: Money
     transaction_count: int
 
 
 class IncomeCategoryBreakdown(BaseModel):
     category: str
-    total_amount: float
+    total_amount: Money
     percentage: float
     count: int
 
@@ -81,9 +83,9 @@ class IncomeCategoryBreakdown(BaseModel):
 class IncomeStreamResponse(BaseModel):
     is_connected: bool
     active_consent: BankingConsentResponse | None = None
-    total_inward_income: float
+    total_inward_income: Money
     total_credits_count: int
-    avg_ticket_size: float
+    avg_ticket_size: Money
     monthly_trend: list[MonthlyIncomePoint]
     category_breakdown: list[IncomeCategoryBreakdown]
     recent_inflows: list[IncomeTransactionItem]
@@ -95,14 +97,14 @@ class IncomeGraphNode(BaseModel):
     label: str
     type: str  # SOURCE_BANK, AA_TUNNEL, INCOME_HUB, INFLOW_CATEGORY, RECEIPT_NODE
     subtext: str
-    volume: float
+    volume: Money
     count: int = 1
 
 
 class IncomeGraphEdge(BaseModel):
     from_node: str
     to_node: str
-    amount: float
+    amount: Money
     label: str = "CREDIT"
     status: str = "VERIFIED_CREDIT"
 
@@ -110,6 +112,6 @@ class IncomeGraphEdge(BaseModel):
 class IncomeGraphResponse(BaseModel):
     nodes: list[IncomeGraphNode]
     edges: list[IncomeGraphEdge]
-    total_inward_volume: float
+    total_inward_volume: Money
     fip_name: str
     currency: str = "INR"

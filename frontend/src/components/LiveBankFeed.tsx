@@ -38,8 +38,8 @@ export function LiveBankFeed() {
     }
   };
 
-  const handleEmitInstant = () => {
-    emitCreditMutation.mutate(undefined, {
+  const handleEmitInstant = (direction: 'CREDIT' | 'DEBIT' = 'CREDIT') => {
+    emitCreditMutation.mutate(direction, {
       onSuccess: (res: any) => {
         if (res?.txn_id) {
           setFlashId(res.txn_id);
@@ -77,10 +77,13 @@ export function LiveBankFeed() {
             <Radio className="w-4 h-4 animate-pulse" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-sm font-semibold text-slate-900 tracking-tight">
                 Live Account Aggregator Feed
               </h3>
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
+                Sandbox Simulator
+              </span>
               {isRunning ? (
                 <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
@@ -94,22 +97,33 @@ export function LiveBankFeed() {
               )}
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Simulates live RBI Account Aggregator inward credit events pushed over SSE into PostgreSQL
+              Simulates live RBI Account Aggregator CREDIT &amp; DEBIT events pushed over SSE into PostgreSQL
             </p>
           </div>
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={handleEmitInstant}
+            onClick={() => handleEmitInstant('CREDIT')}
             disabled={emitCreditMutation.isPending}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-600 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-            title="Immediately emits 1 verified UPI credit without waiting"
+            title="Immediately emits 1 simulated UPI credit without waiting"
           >
             <Zap className="w-3.5 h-3.5 fill-current" />
             {emitCreditMutation.isPending ? 'Emitting...' : 'Emit Test Credit'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleEmitInstant('DEBIT')}
+            disabled={emitCreditMutation.isPending}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-700 hover:bg-slate-800 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            title="Immediately emits 1 simulated UPI debit expense into Personal Spending & Unified Ledger"
+          >
+            <Zap className="w-3.5 h-3.5" />
+            Emit Test Debit
           </button>
 
           <button

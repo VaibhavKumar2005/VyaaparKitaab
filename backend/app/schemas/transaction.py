@@ -1,14 +1,17 @@
 from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.cores.money import Money
+
 
 class InvoiceItemCreate(BaseModel):
     product_id: UUID
-    quantity: float
-    unit_price: float
-    discount: float = 0
+    quantity: Money
+    unit_price: Money
+    discount: Money = Decimal("0.00")
 
 
 class InvoiceCreate(BaseModel):
@@ -17,19 +20,19 @@ class InvoiceCreate(BaseModel):
     customer_id: UUID | None = None
     type: str = "SALE"
     status: str = "DRAFT"
-    subtotal: float = 0
-    tax_amount: float = 0
+    subtotal: Money = Decimal("0.00")
+    tax_amount: Money = Decimal("0.00")
     gst_rate: float | None = Field(default=None, ge=0.0, le=0.28)
-    discount_amount: float = 0
-    total_amount: float = 0
-    paid_amount: float = 0
+    discount_amount: Money = Decimal("0.00")
+    total_amount: Money = Decimal("0.00")
+    paid_amount: Money = Decimal("0.00")
     payment_method: str | None = None
     items: list[InvoiceItemCreate] = Field(default_factory=list)
 
 
 class InvoiceItemRead(InvoiceItemCreate):
     id: UUID
-    line_total: float
+    line_total: Money
 
 
 class InvoiceRead(BaseModel):
@@ -39,11 +42,11 @@ class InvoiceRead(BaseModel):
     customer_id: UUID | None
     type: str
     status: str
-    subtotal: float
-    tax_amount: float
-    discount_amount: float
-    total_amount: float
-    paid_amount: float
+    subtotal: Money
+    tax_amount: Money
+    discount_amount: Money
+    total_amount: Money
+    paid_amount: Money
     payment_method: str | None
     created_at: datetime
     store_name: str | None = None
@@ -61,11 +64,11 @@ class CustomerInvoiceRead(BaseModel):
     business_id: UUID
     type: str
     status: str
-    subtotal: float
-    tax_amount: float
-    discount_amount: float
-    total_amount: float
-    paid_amount: float
+    subtotal: Money
+    tax_amount: Money
+    discount_amount: Money
+    total_amount: Money
+    paid_amount: Money
     payment_method: str | None
     created_at: datetime
     store_name: str | None = None
@@ -107,10 +110,10 @@ class UnifiedTransactionRead(BaseModel):
     customer_id: str | None = None
     direction: str
     side: str
-    amount: float
-    paid_amount: float
-    discount_amount: float
-    tax_amount: float
+    amount: Money
+    paid_amount: Money
+    discount_amount: Money
+    tax_amount: Money
     currency: str = "INR"
     status: str
     channel: str
@@ -130,10 +133,10 @@ class UnifiedCategoryUpdate(BaseModel):
 
 class UnifiedTransactionFeedResponse(BaseModel):
     total_count: int
-    total_amount: float
-    total_discount_saved: float
-    total_debits: float
-    total_credits: float
+    total_amount: Money
+    total_discount_saved: Money
+    total_debits: Money
+    total_credits: Money
     nested_summary: dict[str, dict[str, float]]
     category_tree: list[CategoryTreeItem] = Field(default_factory=list)
     items: list[UnifiedTransactionRead] = Field(default_factory=list)
@@ -147,8 +150,8 @@ class CustomerNotificationRead(BaseModel):
     store_name: str
     title: str
     message: str
-    amount: float
-    discount_amount: float
+    amount: Money
+    discount_amount: Money
     category: str
     subcategory: str
     payment_channel: str | None = None

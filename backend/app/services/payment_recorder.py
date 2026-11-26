@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.cores.money import ZERO, money_to_float, to_money
 from app.models.payment import Payment
 from app.models.transaction import Invoice
 from app.services.event_bus import publish_event
@@ -15,6 +16,10 @@ from app.services.notifications import resolve_linked_customer_user
 from app.services.unified_ledger import sync_invoice_to_unified
 
 logger = logging.getLogger(__name__)
+
+
+class OverpaymentError(ValueError):
+    """Raised when a payment would push an invoice's paid_amount above total_amount."""
 
 
 def detect_upi_app(vpa: str | None, method: str | None = None) -> str:
@@ -74,8 +79,9 @@ async def record_payment(
         raise ValueError("invoice_id is required to record a payment")
 
     order_id = payment_data.get("order_id")
-    raw_amount = payment_data.get("amount", 0.0)
-    amount = float(raw_amount)
+    amount_dec = to_money(payment_data.get("amount", ZERO))
+    if amount_dec <= ZERO:
+        raise ValueError("Payment amount must be positive")
     currency = payment_data.get("currency", "INR")
     method = (payment_data.get("method") or "UPI").upper()
     vpa = payment_data.get("vpa")
@@ -84,8 +90,14 @@ async def record_payment(
 
     app = detect_upi_app(vpa, method)
 
-    # 1. Fetch target invoice
-    res = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
+    # 1. Acquire exclusive row lock on target invoice (prevents concurrent overpayment races)
+    inv_stmt = (
+        select(Invoice)
+        .where(Invoice.id == invoice_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    res = await db.execute(inv_stmt)
     invoice = res.scalar_one_or_none()
     if not invoice:
         raise ValueError(f"Invoice not found: {invoice_id}")
@@ -94,12 +106,12 @@ async def record_payment(
     customer_id = payment_data.get("customer_id") or invoice.customer_id
 
     raw_text = (
-        json.dumps(raw_response)
+        json.dumps(raw_response, default=str)
         if isinstance(raw_response, dict)
         else (str(raw_response) if raw_response else None)
     )
 
-    # 2. Atomic upsert with ON CONFLICT DO NOTHING
+    # 2. Atomic upsert with ON CONFLICT DO NOTHING (idempotent replay detection)
     stmt = (
         insert(Payment)
         .values(
@@ -108,7 +120,7 @@ async def record_payment(
             business_id=UUID(str(business_id)) if isinstance(business_id, str) else business_id,
             invoice_id=invoice.id,
             customer_id=UUID(str(customer_id)) if isinstance(customer_id, str) and customer_id else customer_id,
-            amount=amount,
+            amount=amount_dec,
             currency=currency,
             method=method,
             vpa=vpa,
@@ -133,18 +145,26 @@ async def record_payment(
             "inserted": False,
             "payment_id": payment_id,
             "invoice_id": str(invoice.id),
-            "paid_amount": float(invoice.paid_amount or 0.0),
+            "paid_amount": money_to_float(invoice.paid_amount or ZERO),
             "invoice_status": invoice.status,
             "app": app,
             "message": "Payment already recorded (duplicate skipped)",
         }
 
-    # 4. If row was inserted, update invoice paid_amount
-    current_paid = float(invoice.paid_amount or 0.0)
-    new_paid = min(float(invoice.total_amount), current_paid + max(0.0, amount))
+    # 4. Enforce exact Decimal overpayment guard while holding the FOR UPDATE lock
+    current_paid = to_money(invoice.paid_amount or ZERO)
+    total_dec = to_money(invoice.total_amount or ZERO)
+    new_paid = current_paid + amount_dec
+    if new_paid > total_dec:
+        if hasattr(db, "rollback"):
+            await db.rollback()
+        raise OverpaymentError(
+            f"Overpayment rejected: {new_paid} exceeds invoice total {total_dec}"
+        )
+
     invoice.paid_amount = new_paid
 
-    if new_paid >= float(invoice.total_amount):
+    if new_paid >= total_dec:
         invoice.status = "PAID"
     else:
         invoice.status = "CONFIRMED"
@@ -174,13 +194,16 @@ async def record_payment(
     await db.commit()
     await db.refresh(invoice)
 
+    amount_num = money_to_float(amount_dec)
+    new_paid_num = money_to_float(new_paid)
+
     # 5. Broadcast to real-time SSE event bus
     event_payload = {
         "event": "payment.captured",
         "payment_id": payment_id,
         "order_id": order_id,
         "invoice_id": str(invoice.id),
-        "amount": amount,
+        "amount": amount_num,
         "currency": currency,
         "method": method,
         "vpa": vpa,
@@ -198,9 +221,9 @@ async def record_payment(
     )
 
     logger.info(
-        "Recorded payment %s: amount=%.2f, app=%s, invoice_id=%s, new_paid=%.2f",
+        "Recorded payment %s: amount=%s, app=%s, invoice_id=%s, new_paid=%s",
         payment_id,
-        amount,
+        amount_dec,
         app,
         invoice.id,
         new_paid,
@@ -211,7 +234,7 @@ async def record_payment(
         "payment_record_id": str(inserted_id),
         "payment_id": payment_id,
         "invoice_id": str(invoice.id),
-        "paid_amount": new_paid,
+        "paid_amount": new_paid_num,
         "invoice_status": invoice.status,
         "app": app,
         "message": "Payment recorded successfully",

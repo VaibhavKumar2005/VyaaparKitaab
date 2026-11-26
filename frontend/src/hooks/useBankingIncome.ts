@@ -684,15 +684,19 @@ export function useStopBankDemoStream() {
 export function useEmitBankCredit() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
-      return await apiFetch<Record<string, unknown>>('/banking/demo-stream/emit', {
-        method: 'POST',
-      });
+    mutationFn: async (direction: 'CREDIT' | 'DEBIT' | 'AUTO' = 'CREDIT') => {
+      return await apiFetch<Record<string, unknown>>(
+        `/banking/demo-stream/emit?direction=${direction}`,
+        {
+          method: 'POST',
+        },
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bank_demo_stream_status'] });
       queryClient.invalidateQueries({ queryKey: ['banking_income_stream'] });
       queryClient.invalidateQueries({ queryKey: ['personal_spending'] });
+      queryClient.invalidateQueries({ queryKey: ['unified_transactions'] });
     },
   });
 }

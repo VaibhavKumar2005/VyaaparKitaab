@@ -2,6 +2,7 @@ from app.models.banking_consent import BankingConsent, BankTransaction, PaymentW
 from app.models.business import Business, Customer, Product, Supplier
 from app.models.payment import Payment
 from app.models.purchase import PersonalPurchase
+from app.models.rate_limit_hit import RateLimitHit, SseEventPayload
 from app.models.refresh_token import RefreshToken
 from app.models.transaction import Invoice, InvoiceItem, OTPVerification
 from app.models.unified_transaction import CustomerNotification, UnifiedTransaction
@@ -20,7 +21,9 @@ __all__ = [
     "PaymentWebhookEvent",
     "PersonalPurchase",
     "Product",
+    "RateLimitHit",
     "RefreshToken",
+    "SseEventPayload",
     "Supplier",
     "UnifiedTransaction",
     "User",

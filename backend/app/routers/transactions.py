@@ -107,12 +107,19 @@ async def create_invoice(
     if inv_status not in VALID_INVOICE_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid invoice status")
 
-    # Compute line totals and subtotal strictly server-side
-    computed_subtotal = 0.0
-    validated_items: list[tuple[Product | None, float, float, float, float]] = []
+    # Compute line totals and subtotal strictly server-side using exact Decimal arithmetic
+    from decimal import Decimal
+
+    from app.cores.money import ZERO, to_money
+
+    computed_subtotal = ZERO
+    validated_items: list[tuple[Product | None, Decimal, Decimal, Decimal, Decimal]] = []
 
     for item in payload.items:
-        if item.quantity <= 0 or item.unit_price < 0 or item.discount < 0:
+        qty_dec = to_money(item.quantity)
+        price_dec = to_money(item.unit_price)
+        disc_dec = to_money(item.discount)
+        if qty_dec <= ZERO or price_dec < ZERO or disc_dec < ZERO:
             raise HTTPException(status_code=400, detail="Invalid item quantity, price, or discount")
 
         prod_res = await db.execute(
@@ -125,20 +132,28 @@ async def create_invoice(
         if not product:
             raise HTTPException(status_code=400, detail=f"Product {item.product_id} does not belong to this business")
 
-        line_total = round(max((float(item.quantity) * float(item.unit_price)) - float(item.discount), 0.0), 2)
+        line_total = max(to_money(qty_dec * price_dec) - disc_dec, ZERO)
         computed_subtotal += line_total
-        validated_items.append((product, float(item.quantity), float(item.unit_price), float(item.discount), line_total))
+        validated_items.append((product, qty_dec, price_dec, disc_dec, line_total))
 
-    computed_subtotal = round(computed_subtotal, 2)
-    invoice_discount = round(max(float(payload.discount_amount or 0.0), 0.0), 2)
-    taxable_amount = max(computed_subtotal - invoice_discount, 0.0)
+    computed_subtotal = to_money(computed_subtotal)
+    invoice_discount = max(to_money(payload.discount_amount or ZERO), ZERO)
+    taxable_amount = max(computed_subtotal - invoice_discount, ZERO)
     if payload.gst_rate is not None:
-        computed_tax = round(taxable_amount * float(payload.gst_rate), 2)
+        computed_tax = to_money(taxable_amount * Decimal(str(payload.gst_rate)))
     else:
-        computed_tax = round(taxable_amount * DEFAULT_GST_RATE, 2) if payload.tax_amount is None or payload.tax_amount > 0 else 0.0
-    computed_total = round(taxable_amount + computed_tax, 2)
+        computed_tax = (
+            to_money(taxable_amount * Decimal(str(DEFAULT_GST_RATE)))
+            if payload.tax_amount is None or to_money(payload.tax_amount) > ZERO
+            else ZERO
+        )
+    computed_total = to_money(taxable_amount + computed_tax)
 
-    initial_paid = computed_total if inv_status == "PAID" else min(max(float(payload.paid_amount or 0.0), 0.0), computed_total)
+    initial_paid = (
+        computed_total
+        if inv_status == "PAID"
+        else min(max(to_money(payload.paid_amount or ZERO), ZERO), computed_total)
+    )
 
     invoice = Invoice(
         invoice_number=payload.invoice_number,
@@ -172,9 +187,9 @@ async def create_invoice(
         # Deduct or replenish stock when invoice is confirmed or paid
         if inv_status in ("CONFIRMED", "PAID") and product is not None:
             if inv_type == "SALE":
-                product.stock_qty = max(0.0, float(product.stock_qty) - qty)
+                product.stock_qty = max(ZERO, to_money(product.stock_qty) - qty)
             elif inv_type == "PURCHASE":
-                product.stock_qty = float(product.stock_qty) + qty
+                product.stock_qty = to_money(product.stock_qty) + qty
 
     await sync_invoice_to_unified(
         db,

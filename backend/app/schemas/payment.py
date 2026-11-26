@@ -2,15 +2,17 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.cores.money import Money, OptionalMoney
+
 
 class PaymentOrderCreate(BaseModel):
     invoice_id: UUID
-    amount: float | None = None
+    amount: OptionalMoney = None
 
 
 class PaymentOrderResponse(BaseModel):
     order_id: str
-    amount: float
+    amount: Money
     currency: str
     receipt: str
     key_id: str
@@ -30,7 +32,7 @@ class PaymentVerifyRequest(BaseModel):
 class PaymentInfoResponse(BaseModel):
     payment_id: str
     order_id: str | None = None
-    amount: float
+    amount: Money
     currency: str = "INR"
     status: str
     method: str | None = None

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cores.config import settings
 from app.cores.database import get_db
-from app.cores.rate_limit import check_rate_limit
+from app.cores.rate_limit import enforce_rate_limit
 from app.models.business import Business
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
@@ -34,6 +34,10 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     existing = await db.execute(select(User).where(User.email == payload.email))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
+    if payload.phone:
+        existing_phone = await db.execute(select(User).where(User.phone == payload.phone))
+        if existing_phone.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Phone number already registered")
 
     allowed_roles = {"STORE_OWNER", "CUSTOMER"}
     if payload.role and payload.role not in allowed_roles:
@@ -74,7 +78,9 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
 
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
-    check_rate_limit(f"login:{payload.email.lower()}", max_requests=10, window_seconds=60)
+    await enforce_rate_limit(
+        f"login:{payload.email.lower()}", max_requests=10, window_seconds=60, db=db
+    )
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
     if not user or not verify_password(payload.password, user.hashed_password):
@@ -106,7 +112,9 @@ async def send_otp(
 ):
     raw_identifier = phone.strip()
     clean_phone = raw_identifier if "@" in raw_identifier else raw_identifier.replace(" ", "").replace("+91", "")
-    check_rate_limit(f"otp_send:{clean_phone}", max_requests=5, window_seconds=60)
+    await enforce_rate_limit(
+        f"otp_send:{clean_phone}", max_requests=5, window_seconds=60, db=db
+    )
     try:
         return await dispatch_otp(db, clean_phone, purpose, email=email)
     except ValueError as exc:
@@ -182,7 +190,9 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 async def verify_otp_endpoint(phone: str, otp: str, purpose: str = "TRANSACTION", db: AsyncSession = Depends(get_db)):
     raw_identifier = phone.strip()
     clean_phone = raw_identifier.lower() if "@" in raw_identifier else raw_identifier.replace(" ", "").replace("+91", "")
-    check_rate_limit(f"otp_verify:{clean_phone}", max_requests=10, window_seconds=60)
+    await enforce_rate_limit(
+        f"otp_verify:{clean_phone}", max_requests=10, window_seconds=60, db=db
+    )
     is_valid = await check_otp_code(db, clean_phone, otp, purpose)
     if is_valid:
         if "@" in clean_phone:
@@ -226,6 +236,9 @@ async def customer_otp_login(payload: CustomerOtpLoginRequest, db: AsyncSession 
         if not clean_identifier.isdigit() or len(clean_identifier) < 10:
             raise HTTPException(status_code=400, detail="Invalid phone number format")
 
+    await enforce_rate_limit(
+        f"otp_verify:{clean_identifier}", max_requests=10, window_seconds=60, db=db
+    )
     is_valid = await check_otp_code(db, clean_identifier, payload.otp, purpose="LOGIN")
     if not is_valid:
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")

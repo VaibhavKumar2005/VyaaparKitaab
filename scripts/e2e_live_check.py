@@ -35,6 +35,7 @@ def main() -> int:
     wait_up()
     tag = uuid.uuid4().hex[:6]
     owner_email = f"owner_{tag}@shop.in"
+    owner_phone = f"97{uuid.uuid4().int % 10**8:08d}"
     cust_phone = f"98{uuid.uuid4().int % 10**8:08d}"
 
     # UI + proxy
@@ -46,7 +47,7 @@ def main() -> int:
     c = httpx.Client(base_url=f"{UI}/api/v1", timeout=15)
     r = c.post(
         "/auth/register",
-        json={"email": owner_email, "password": "Str0ng!Pass1", "full_name": "Nisha Gupta", "phone": "9988776655", "role": "STORE_OWNER"},
+        json={"email": owner_email, "password": "Str0ng!Pass1", "full_name": "Nisha Gupta", "phone": owner_phone, "role": "STORE_OWNER"},
     )
     check("Register store owner", r.status_code == 200, str(r.status_code))
     h = {"Authorization": f"Bearer {r.json()['access_token']}"}

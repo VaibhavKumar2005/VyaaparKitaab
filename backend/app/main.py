@@ -51,7 +51,13 @@ async def lifespan(_: FastAPI):
 
         async with SessionLocal() as session:
             await seed_database_if_empty(session)
-    yield
+    try:
+        yield
+    finally:
+        from app.services.event_bus import PostgresEventBus, event_bus
+
+        if isinstance(event_bus, PostgresEventBus):
+            await event_bus.close()
 
 
 app = FastAPI(title="VyaparKitaab API", version="0.1.0", lifespan=lifespan)

@@ -1,6 +1,26 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
 import { isDemoMode } from '../mock/mockStore';
+
+export type PaymentGatewayStatus = {
+  gateway: string;
+  razorpay_configured: boolean;
+  is_live_mode: boolean;
+  is_test_mode: boolean;
+  webhook_secret_configured: boolean;
+  webhook_endpoint: string;
+  bank_data_provider: string;
+  is_aa_sandbox: boolean;
+};
+
+export type RazorpaySyncResult = {
+  status: string;
+  gateway: string;
+  fetched_count: number;
+  invoices_settled: number;
+  ledger_synced: number;
+  message: string;
+};
 
 export type PaymentSummaryItem = {
   app: string;
@@ -124,6 +144,57 @@ export function usePaymentSummary(period: string = '30d') {
       }
     },
     staleTime: 5000,
+  });
+}
+
+export function usePaymentGatewayStatus() {
+  return useQuery<PaymentGatewayStatus>({
+    queryKey: ['payments', 'gateway_status'],
+    queryFn: async () => {
+      if (isDemoMode()) {
+        return {
+          gateway: 'sandbox',
+          razorpay_configured: false,
+          is_live_mode: false,
+          is_test_mode: false,
+          webhook_secret_configured: false,
+          webhook_endpoint: '/api/v1/payments/webhook',
+          bank_data_provider: 'mock',
+          is_aa_sandbox: true,
+        };
+      }
+      return await apiFetch<PaymentGatewayStatus>('/payments/gateway-status');
+    },
+    staleTime: 30000,
+  });
+}
+
+export function useSyncRazorpayHistory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (count: number = 25): Promise<RazorpaySyncResult> => {
+      if (isDemoMode()) {
+        return {
+          status: 'sandbox_not_configured',
+          gateway: 'sandbox',
+          fetched_count: 0,
+          invoices_settled: 0,
+          ledger_synced: 0,
+          message: 'Switch out of demo mode and set Razorpay keys in .env to pull live Razorpay payments.',
+        };
+      }
+      return await apiFetch<RazorpaySyncResult>(`/payments/sync-history?count=${count}`, {
+        method: 'POST',
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['banking_income_stream'] });
+      queryClient.invalidateQueries({ queryKey: ['personal_spending'] });
+      queryClient.invalidateQueries({ queryKey: ['unified_transactions'] });
+    },
   });
 }
 

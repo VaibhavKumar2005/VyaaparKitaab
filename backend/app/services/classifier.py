@@ -17,7 +17,10 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from decimal import Decimal
 from typing import Any
+
+from app.cores.money import HUNDRED, ZERO, money_to_float, to_money
 
 TAXONOMY: dict[str, list[str]] = {
     "Food": [
@@ -423,7 +426,7 @@ def classify_hierarchical(
     text: str = "",
     counterparty: str = "",
     direction: str = "DEBIT",
-    amount: float | None = None,
+    amount: Decimal | float | None = None,
     explicit_category: str | None = None,
     explicit_subcategory: str | None = None,
     source_type: str | None = None,
@@ -528,14 +531,14 @@ def build_category_tree(records: Iterable[Mapping[str, Any]]) -> tuple[dict[str,
       1. `nested_summary`: `{category: {subcategory: rounded_total}}`
       2. `hierarchy_list`: `[{'category', 'total_amount', 'count', 'percentage', 'subcategories': [...]}]`
     """
-    cat_totals: dict[str, float] = defaultdict(float)
+    cat_totals: dict[str, Decimal] = defaultdict(lambda: ZERO)
     cat_counts: dict[str, int] = defaultdict(int)
-    sub_totals: dict[tuple[str, str], float] = defaultdict(float)
+    sub_totals: dict[tuple[str, str], Decimal] = defaultdict(lambda: ZERO)
     sub_counts: dict[tuple[str, str], int] = defaultdict(int)
-    grand_total = 0.0
+    grand_total = ZERO
 
     for rec in records:
-        amt = float(rec.get("amount", 0.0) or 0.0)
+        amt = to_money(rec.get("amount", ZERO) or ZERO)
         cat, sub = normalize_category_pair(rec.get("category"), rec.get("subcategory"))
         grand_total += amt
         cat_totals[cat] += amt
@@ -545,33 +548,33 @@ def build_category_tree(records: Iterable[Mapping[str, Any]]) -> tuple[dict[str,
 
     nested: dict[str, dict[str, float]] = {}
     hierarchy: list[dict[str, Any]] = []
-    denom = grand_total if grand_total > 0 else 1.0
+    denom = grand_total if grand_total > ZERO else Decimal("1.00")
 
     for cat, c_amt in sorted(cat_totals.items(), key=lambda x: x[1], reverse=True):
         nested[cat] = {}
         subs: list[dict[str, Any]] = []
-        cat_denom = c_amt if c_amt > 0 else 1.0
+        cat_denom = c_amt if c_amt > ZERO else Decimal("1.00")
         for (s_cat, s_name), s_amt in sorted(
             ((k, v) for k, v in sub_totals.items() if k[0] == cat),
             key=lambda x: x[1],
             reverse=True,
         ):
-            rounded_s = round(s_amt, 2)
+            rounded_s = money_to_float(s_amt)
             nested[cat][s_name] = rounded_s
             subs.append(
                 {
                     "subcategory": s_name,
                     "total_amount": rounded_s,
                     "count": sub_counts[(s_cat, s_name)],
-                    "percentage": round((s_amt / cat_denom) * 100.0, 1),
+                    "percentage": round(float((s_amt / cat_denom) * HUNDRED), 1),
                 }
             )
         hierarchy.append(
             {
                 "category": cat,
-                "total_amount": round(c_amt, 2),
+                "total_amount": money_to_float(c_amt),
                 "count": cat_counts[cat],
-                "percentage": round((c_amt / denom) * 100.0, 1),
+                "percentage": round(float((c_amt / denom) * HUNDRED), 1),
                 "subcategories": subs,
             }
         )

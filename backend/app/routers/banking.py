@@ -299,14 +299,15 @@ async def get_bank_demo_stream_status(
 
 @router.post("/demo-stream/emit", status_code=status.HTTP_201_CREATED)
 async def emit_single_bank_credit(
+    direction: str = Query(default="CREDIT", pattern="^(CREDIT|DEBIT|AUTO)$"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """
-    Immediately generates, persists, and publishes a single realistic UPI credit transaction.
-    Ideal for presentation triggers ("Emit One Test Credit") without waiting for the timer.
+    Immediately generates, persists, and publishes a single realistic sandbox UPI transaction
+    (CREDIT inflow, DEBIT expense, or AUTO mix) for live pitch demonstrations.
     """
-    return await emit_simulated_credit(db=db, user_id=user.id)
+    return await emit_simulated_credit(db=db, user_id=user.id, direction=direction)
 
 
 class UpiBridgeIngestPayload(BaseModel):

@@ -826,6 +826,8 @@ async def test_phase1_security_hardening_audit_fixes(monkeypatch):
         role="STORE_OWNER",
     )
     inv_id = uuid4()
+    live_order_id = f"order_live_{uuid4().hex[:8]}"
+    live_pay_id = f"pay_live_{uuid4().hex[:8]}"
     async with SessionLocal() as db:
         db.add(merchant)
         await db.flush()
@@ -842,7 +844,7 @@ async def test_phase1_security_hardening_audit_fixes(monkeypatch):
             tax_amount=0.0,
             total_amount=1000.0,
             paid_amount=0.0,
-            pending_order_id="order_live_999",
+            pending_order_id=live_order_id,
             pending_order_amount=1000.0,
         )
         db.add(inv)
@@ -860,7 +862,11 @@ async def test_phase1_security_hardening_audit_fixes(monkeypatch):
             # 2. Live gateway /payments/verify must fail closed on lookup error, failed status, and tampered amount
             settings.PAYMENT_GATEWAY = "razorpay"
             payment_service.key_secret = "rzp_test_sec_key"
-            valid_sig = hmac.new(b"rzp_test_sec_key", b"order_live_999|pay_live_999", hashlib.sha256).hexdigest()
+            valid_sig = hmac.new(
+                b"rzp_test_sec_key",
+                f"{live_order_id}|{live_pay_id}".encode(),
+                hashlib.sha256,
+            ).hexdigest()
 
             async def _raise_gw(_pid: str):
                 raise RuntimeError("Gateway unreachable")
@@ -869,8 +875,8 @@ async def test_phase1_security_hardening_audit_fixes(monkeypatch):
             r_err = await client.post(
                 "/api/v1/payments/verify",
                 json={
-                    "order_id": "order_live_999",
-                    "payment_id": "pay_live_999",
+                    "order_id": live_order_id,
+                    "payment_id": live_pay_id,
                     "signature": valid_sig,
                     "invoice_id": str(inv_id),
                 },
@@ -878,14 +884,14 @@ async def test_phase1_security_hardening_audit_fixes(monkeypatch):
             assert r_err.status_code == 502
 
             async def _failed_status(_pid: str):
-                return {"payment_id": _pid, "order_id": "order_live_999", "amount": 1000.0, "currency": "INR", "status": "failed"}
+                return {"payment_id": _pid, "order_id": live_order_id, "amount": 1000.0, "currency": "INR", "status": "failed"}
 
             monkeypatch.setattr(payment_service, "get_payment_info", _failed_status)
             r_fail = await client.post(
                 "/api/v1/payments/verify",
                 json={
-                    "order_id": "order_live_999",
-                    "payment_id": "pay_live_999",
+                    "order_id": live_order_id,
+                    "payment_id": live_pay_id,
                     "signature": valid_sig,
                     "invoice_id": str(inv_id),
                 },
@@ -893,14 +899,14 @@ async def test_phase1_security_hardening_audit_fixes(monkeypatch):
             assert r_fail.status_code == 400
 
             async def _tampered_amt(_pid: str):
-                return {"payment_id": _pid, "order_id": "order_live_999", "amount": 10.0, "currency": "INR", "status": "captured"}
+                return {"payment_id": _pid, "order_id": live_order_id, "amount": 10.0, "currency": "INR", "status": "captured"}
 
             monkeypatch.setattr(payment_service, "get_payment_info", _tampered_amt)
             r_amt = await client.post(
                 "/api/v1/payments/verify",
                 json={
-                    "order_id": "order_live_999",
-                    "payment_id": "pay_live_999",
+                    "order_id": live_order_id,
+                    "payment_id": live_pay_id,
                     "signature": valid_sig,
                     "invoice_id": str(inv_id),
                 },
@@ -910,7 +916,7 @@ async def test_phase1_security_hardening_audit_fixes(monkeypatch):
             async def _captured_ok(_pid: str):
                 return {
                     "payment_id": _pid,
-                    "order_id": "order_live_999",
+                    "order_id": live_order_id,
                     "amount": 1000.0,
                     "currency": "INR",
                     "status": "captured",
@@ -923,8 +929,8 @@ async def test_phase1_security_hardening_audit_fixes(monkeypatch):
             r_ok = await client.post(
                 "/api/v1/payments/verify",
                 json={
-                    "order_id": "order_live_999",
-                    "payment_id": "pay_live_999",
+                    "order_id": live_order_id,
+                    "payment_id": live_pay_id,
                     "signature": valid_sig,
                     "invoice_id": str(inv_id),
                 },
