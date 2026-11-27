@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from app.cores.config import settings
 from app.cores.database import SessionLocal
 from app.cores.exceptions import register_exception_handlers
+from app.cores.log_redaction import install_log_redaction
 from app.routers.ai_insights import router as ai_router
 from app.routers.auth import router as auth_router
 from app.routers.banking import router as banking_router
@@ -42,6 +43,7 @@ def _init_sentry() -> None:
 
 
 _init_sentry()
+install_log_redaction()
 
 
 @asynccontextmanager

@@ -327,9 +327,11 @@ async def check_otp_code(
             await db.commit()
             return False
 
-    # Allow 123456 fallback in dev/test for LOGIN purpose when no live provider is forced
+    # Static 123456 bypass exists ONLY for the automated test suite (ENV=testing).
+    # It is intentionally NOT honoured in ENV=development: a dev server that is reachable
+    # over LAN/tunnel would otherwise allow account takeover for any phone/email.
     return bool(
         purpose == "LOGIN"
-        and settings.ENV.lower() in ("development", "testing")
+        and settings.ENV.lower() == "testing"
         and otp.strip() == "123456"
     )
