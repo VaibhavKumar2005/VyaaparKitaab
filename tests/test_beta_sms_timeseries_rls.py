@@ -309,3 +309,29 @@ async def test_otp_json_body_endpoints_avoid_query_string_leak():
         assert ver_res.status_code == 200, ver_res.text
         assert ver_res.json()["verified"] is True
     await engine.dispose()
+
+
+def test_redos_adversarial_inputs_finish_in_linear_time():
+    """Ensures CodeQL-remediated regexes and PDF/SMS parsers never exhibit polynomial backtracking."""
+    import time
+
+    from app.services.statement_importer import (
+        _clean_col_key,
+        _iter_pdf_raw_streams,
+        _parse_multiline_bank_pdf_rows,
+        _parse_phonepe_paytm_pdf_blocks,
+    )
+    from app.services.upi_bridge import is_security_or_otp_message
+
+    t0 = time.perf_counter()
+    assert _clean_col_key("(" * 25_000) == ""
+    assert _iter_pdf_raw_streams(b"stream\n" * 5_000) == []
+    assert is_security_or_otp_message("has requested" + " " * 25_000 + "!") is False
+    clean_bal, _ = scrub_sensitive_text("Avl Bal" + " " * 25_000 + "!")
+    assert "Avl" in clean_bal
+    clean_acc, _ = scrub_sensitive_text("A/C" + " " * 25_000 + "!")
+    assert "A/C" in clean_acc
+    assert _parse_phonepe_paytm_pdf_blocks(["2026-11-15 Paid to Swiggy ₹100.00 UTR" + " " * 25_000 + "!"]) is not None
+    assert _parse_multiline_bank_pdf_rows(["2026-11-15 " + "1" * 25_000 + "!"]) == []
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 1.5, f"Potential ReDoS regression: adversarial batch took {elapsed:.2f}s"

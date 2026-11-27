@@ -1,5 +1,6 @@
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
@@ -98,8 +99,17 @@ async def test_multi_tenant_invoice_business_details_and_upi_vpa():
             assert upd_res.status_code == 200
             assert upd_res.json()["upi_vpa"] == "nisha.store@ybl"
 
-            # Verify CSP permits Razorpay Checkout widget
-            assert "https://checkout.razorpay.com" in order_res.headers.get("content-security-policy", "")
+            # Verify CSP strictly permits Razorpay Checkout origin in script-src & frame-src
+            csp_directives = {
+                parts[0].lower(): parts[1:]
+                for raw in order_res.headers.get("content-security-policy", "").split(";")
+                if (parts := raw.strip().split())
+            }
+            for directive in ("script-src", "frame-src"):
+                assert any(
+                    urlparse(src).scheme == "https" and urlparse(src).hostname == "checkout.razorpay.com"
+                    for src in csp_directives.get(directive, [])
+                ), f"Missing checkout.razorpay.com in CSP {directive}"
 
         # Customer portal sees real store identity on their bill
         app.dependency_overrides[get_current_user] = lambda: customer_user

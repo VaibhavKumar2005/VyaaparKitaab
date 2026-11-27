@@ -7,6 +7,7 @@ from __future__ import annotations
 import sys
 import time
 import uuid
+from urllib.parse import urlparse
 
 import httpx
 
@@ -18,6 +19,17 @@ results: list[tuple[str, bool, str]] = []
 def check(name: str, cond: bool, detail: str = "") -> None:
     results.append((name, bool(cond), detail))
     print(("PASS " if cond else "FAIL ") + name + (f"  [{detail}]" if detail else ""))
+
+
+def _csp_allows_https_host(csp_header: str, directive: str, expected_host: str) -> bool:
+    for part in csp_header.split(";"):
+        tokens = part.strip().split()
+        if tokens and tokens[0].lower() == directive.lower():
+            for src in tokens[1:]:
+                parsed = urlparse(src)
+                if parsed.scheme == "https" and parsed.hostname == expected_host:
+                    return True
+    return False
 
 
 def wait_up() -> None:
@@ -100,7 +112,11 @@ def main() -> int:
     o = r.json()
     check("create-order UPI intent uses store VPA + name", "pa=nisha.pay%40okaxis" in (o.get("upi_intent") or "") and "pn=Nisha%20Electronics" in (o.get("upi_intent") or ""), (o.get("upi_intent") or "")[:100])
     csp = httpx.get(f"{API}/health").headers.get("content-security-policy", "")
-    check("CSP allows Razorpay Checkout", "https://checkout.razorpay.com" in csp and "frame-src" in csp)
+    check(
+        "CSP allows Razorpay Checkout",
+        _csp_allows_https_host(csp, "script-src", "checkout.razorpay.com")
+        and _csp_allows_https_host(csp, "frame-src", "checkout.razorpay.com"),
+    )
 
     # 6. Realistic bank CSV with preamble -> import -> reconcile
     csv_text = (

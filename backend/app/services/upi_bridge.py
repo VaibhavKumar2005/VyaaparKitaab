@@ -87,27 +87,23 @@ DLT_BANK_SENDER_MAP: dict[str, str] = {
 }
 
 _OTP_SECURITY_RE = re.compile(
-    r"\b(?:otp|one[\s-]?time[\s-]?password|verification\s+code|security\s+code|"
-    r"auth(?:entication)?\s+code|login\s+code|passcode|mpin|upi\s*pin|atm\s*pin|tpin|cvv|cvc|"
-    r"secret\s+code|2fa\s+code)\b",
+    r"\b(?:otp|one[ -]?time[ -]?password|verification code|security code|"
+    r"auth(?:entication)? code|login code|passcode|mpin|upi ?pin|atm ?pin|tpin|cvv|cvc|"
+    r"secret code|2fa code)\b",
     re.IGNORECASE,
 )
-_DO_NOT_SHARE_AUTH_RE = re.compile(
-    r"(?:\bdo\s+not\s+share\b.*\b(?:code|otp|pin|password|cvv|mpin)\b|"
-    r"\b(?:code|otp|pin|password|cvv|mpin)\b.*\bdo\s+not\s+share\b)",
-    re.IGNORECASE,
-)
+_DO_NOT_SHARE_KEYWORDS = ("code", "otp", "pin", "password", "cvv", "mpin")
 _PROMO_SPAM_RE = re.compile(
-    r"\b(?:scratch\s+card|win\s+up\s+to|cashback\s+offer|flat\s+\d+%\s+off|apply\s+now|"
-    r"loan\s+approved|pre[\s-]?approved\s+loan|kyc\s+(?:pending|expir|update)|"
-    r"credit\s+limit\s+upgrade|personal\s+loan|congratulations!?\s+you)\b",
+    r"\b(?:scratch card|win up to|cashback offer|flat \d{1,3}% off|apply now|"
+    r"loan approved|pre[ -]?approved loan|kyc (?:pending|expir|update)|"
+    r"credit limit upgrade|personal loan|congratulations!? you)\b",
     re.IGNORECASE,
 )
 _FAILED_OR_REQUEST_RE = re.compile(
-    r"\b(?:failed|declined|unsuccessful|could\s+not\s+be\s+processed|insufficient\s+(?:funds|balance)|"
-    r"collect\s+request|has\s+requested\s+(?:rs\.?|inr|₹)?\s*\d|requested\s+money|"
-    r"payment\s+request\s+of|mandate\s+(?:created|registered|upcoming)|autopay\s+(?:scheduled|reminder)|"
-    r"due\s+on\s+\d|bill\s+is\s+due|will\s+be\s+auto[\s-]?debited|not\s+successful)\b",
+    r"\b(?:failed|declined|unsuccessful|could not be processed|insufficient (?:funds|balance)|"
+    r"collect request|has requested (?:(?:rs\.?|inr|₹) ?)?\d|requested money|"
+    r"payment request of|mandate (?:created|registered|upcoming)|autopay (?:scheduled|reminder)|"
+    r"due on \d|bill is due|will be auto[ -]?debited|not successful)\b",
     re.IGNORECASE,
 )
 _TXN_CUE_RE = re.compile(
@@ -115,36 +111,40 @@ _TXN_CUE_RE = re.compile(
     re.IGNORECASE,
 )
 _CREDIT_CUE_RE = re.compile(
-    r"\b(?:credited|received|paid\s+you|sent\s+you|added\s+to|deposited|refund\s+(?:of|from)|"
-    r"cashback\s+credited|upi/cr/)\b",
+    r"\b(?:credited|received|paid you|sent you|added to|deposited|refund (?:of|from)|"
+    r"cashback credited|upi/cr/)\b",
     re.IGNORECASE,
 )
 _DEBIT_CUE_RE = re.compile(
-    r"\b(?:debited|paid\s+to|paid|sent\s+to|sent|spent|transferred\s+to|withdrawn|"
-    r"purchase\s+at|upi/dr/)\b",
+    r"\b(?:debited|paid to|paid|sent to|sent|spent|transferred to|withdrawn|"
+    r"purchase at|upi/dr/)\b",
     re.IGNORECASE,
 )
 
-# Balance / credit-limit clause stripped BEFORE amount extraction & before persisting narration
+# Balance / credit-limit clause stripped BEFORE amount extraction & before persisting narration.
+# Uses strictly bounded quantifiers on whitespace-normalized text to guarantee O(n) linear matching.
 _BALANCE_CLAUSE_RE = re.compile(
-    r"(?:(?:avl\.?|avail(?:able)?|closing|clear|ledger|updated|current)?\s*"
-    r"(?:bal(?:ance)?|lmt|limit)\s*(?:is|as\s+on\s+\S+)?\s*[:\-]?\s*"
-    r"(?:inr|rs\.?|₹)?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)",
+    r"\b(?:(?:avl\.?|avail(?:able)?|closing|clear|ledger|updated|current) )?"
+    r"(?:bal(?:ance)?|lmt|limit)"
+    r"(?: (?:is|as on \S{1,20}))?"
+    r"(?: ?[:\-])?"
+    r"(?: ?(?:inr|rs\.?|₹))?"
+    r" ?[0-9][0-9,]{0,15}(?:\.[0-9]{1,2})?",
     re.IGNORECASE,
 )
 
 _AMOUNT_INR_RE = re.compile(
-    r"(?:rs\.?|inr|₹)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)",
+    r"(?:rs\.?|inr|₹) ?([0-9][0-9,]{0,15}(?:\.[0-9]{1,2})?)",
     re.IGNORECASE,
 )
 _AMOUNT_VERB_RE = re.compile(
-    r"\b(?:paid|received|debited(?:\s+by|\s+for|\s+with)?|credited(?:\s+by|\s+with)?|sent|spent|withdrawn)\s+"
-    r"(?:rs\.?|inr|₹)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)",
+    r"\b(?:paid|received|debited(?: (?:by|for|with))?|credited(?: (?:by|with))?|sent|spent|withdrawn) "
+    r"(?:(?:rs\.?|inr|₹) ?)?([0-9][0-9,]{0,15}(?:\.[0-9]{1,2})?)",
     re.IGNORECASE,
 )
 _UTR_LABELED_RE = re.compile(
-    r"(?:utr(?:\s*no\.?)?|upi\s*ref(?:\s*no\.?)?|ref(?:\s*no\.?|no)?|upi\s*transaction\s*id|"
-    r"transaction\s*id|txn\s*id|imps\s*ref(?:\s*no\.?)?)\s*[:#\-]?\s*([A-Z0-9]{8,24})",
+    r"\b(?:utr(?: no\.?)?|upi ref(?: no\.?)?|ref(?: no\.?|no)?|upi transaction id|"
+    r"transaction id|txn id|imps ref(?: no\.?)?)(?: ?[:#\-] ?| )([A-Z0-9]{8,24})\b",
     re.IGNORECASE,
 )
 _UTR_SLASH_RE = re.compile(r"UPI/(?:DR|CR|P2M|P2P|P2A)/(\d{8,16})", re.IGNORECASE)
@@ -159,30 +159,31 @@ _SMS_DATE_PATTERNS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
     (re.compile(r"\b(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b"), ("%d-%m-%Y", "%d-%m-%y", "%d/%m/%Y", "%d/%m/%y")),
 )
 
-# Zero-leak credential & PII scrubbing patterns
+# Zero-leak credential & PII scrubbing patterns (strictly bounded quantifiers; inputs are ws-normalized first)
 _ACCOUNT_RAW_RE = re.compile(
-    r"(\b(?:a/c|ac|acct?|account|card)\s*(?:no\.?|number|ending|#)?\s*[:\-]?\s*)"
-    r"([x*\-\s\d]{4,18}?)(\d{4})\b",
+    r"(\b(?:a/c|ac|acct?|account|card)(?: (?:no\.?|number|ending|#))?(?: ?[:\-] ?| ))"
+    r"([x*\-\d]{2,18}?)(\d{4})\b",
     re.IGNORECASE,
 )
-_CARD_GROUPED_RE = re.compile(r"\b(?:\d{4}[-\s]?){3}(\d{4})\b")
+_CARD_GROUPED_RE = re.compile(r"\b(?:\d{4}[- ]?){3}(\d{4})\b")
 _LONG_RAW_DIGITS_RE = re.compile(r"\b\d{13,19}\b")
-_MASKED_ACC_EXTRACT_RE = re.compile(r"(?:[x*]{2,}[-\s]*|XXXX-XXXX-)(\d{3,4})\b", re.IGNORECASE)
+_MASKED_ACC_EXTRACT_RE = re.compile(r"(?:[x*]{2,12}[- ]?|XXXX-XXXX-)(\d{3,4})\b", re.IGNORECASE)
 _SECRET_KV_RE = re.compile(
-    r"\b(password|passwd|mpin|upi[_\s]?pin|tpin|cvv|cvc|bearer|token|api[_\s]?key|secret)\s*[:=]\s*[^\s,;]+",
+    r"\b(password|passwd|mpin|upi[_ ]?pin|tpin|cvv|cvc|bearer|token|api[_ ]?key|secret) ?[:=] ?[^\s,;]{1,128}",
     re.IGNORECASE,
 )
 _KNOWN_TOKEN_RE = re.compile(
-    r"\b(?:vk_upi_[A-Za-z0-9_\-.]+|rzp_(?:live|test)_[A-Za-z0-9]+|AIza[0-9A-Za-z\-_]{20,}|"
-    r"sk_[A-Za-z0-9_\-]{16,}|ghp_[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)\b"
+    r"\b(?:vk_upi_[A-Za-z0-9_\-.]{1,160}|rzp_(?:live|test)_[A-Za-z0-9]{1,64}|AIza[0-9A-Za-z\-_]{20,64}|"
+    r"sk_[A-Za-z0-9_\-]{16,128}|ghp_[A-Za-z0-9]{20,64}|"
+    r"eyJ[A-Za-z0-9_\-]{4,128}\.eyJ[A-Za-z0-9_\-]{4,256}\.[A-Za-z0-9_\-]{4,128})\b"
 )
 _PAN_RE = re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b")
-_AADHAAR_SPACED_RE = re.compile(r"\b\d{4}\s+\d{4}\s+\d{4}\b")
-_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+_AADHAAR_SPACED_RE = re.compile(r"\b\d{4} \d{4} \d{4}\b")
+_URL_RE = re.compile(r"https?://\S{1,512}", re.IGNORECASE)
 
 _TO_FROM_COUNTERPARTY_RE = re.compile(
-    r"\b(?:paid\s+to|sent\s+to|transferred\s+to|trf\s+to|transfer\s+to|received\s+from|spent\s+at|at|from|to)\s+"
-    r"([A-Za-z0-9&._@\- ]{2,45}?)(?=\s+(?:via|using|on|ref|refno|utr|upi|from|at|for|with|a/c|bal|avl|date)\b|\s*[.,;\n—–|]|$)",
+    r"\b(?:paid to|sent to|transferred to|trf to|transfer to|received from|spent at|at|from|to) "
+    r"([A-Za-z0-9&._@\- ]{2,45}?)(?= (?:via|using|on|ref|refno|utr|upi|from|at|for|with|a/c|bal|avl|date)\b| ?[.,;\n—–|]|$)",
     re.IGNORECASE,
 )
 _UPI_SLASH_PARTY_RE = re.compile(
@@ -190,10 +191,15 @@ _UPI_SLASH_PARTY_RE = re.compile(
     re.IGNORECASE,
 )
 _ICICI_SEMI_PARTY_RE = re.compile(
-    r";\s*([A-Za-z0-9&._\- ]{2,40}?)\s+(?:credited|debited)\b",
+    r"; ?([A-Za-z0-9&._\- ]{2,40}?) (?:credited|debited)\b",
     re.IGNORECASE,
 )
-_PAID_YOU_RE = re.compile(r"^\s*([A-Za-z0-9&._\- ]{2,40}?)\s+(?:paid|sent)\s+you\b", re.IGNORECASE)
+_PAID_YOU_RE = re.compile(r"^ ?([A-Za-z0-9&._\- ]{2,40}?) (?:paid|sent) you\b", re.IGNORECASE)
+
+
+def _normalize_ws(text: str) -> str:
+    """Collapses all whitespace runs (including NBSP / narrow NBSP) to single ASCII spaces in O(n)."""
+    return " ".join((text or "").replace("\u00a0", " ").replace("\u202f", " ").split())
 
 
 def _bridge_signing_key() -> bytes:
@@ -269,13 +275,17 @@ def is_security_or_otp_message(text: str, sender_id: str | None = None) -> bool:
     _, is_promo_header = _resolve_dlt_sender(sender_id)
     if is_promo_header:
         return True
-    if not text:
+    norm = _normalize_ws(text)
+    if not norm:
         return False
-    if _OTP_SECURITY_RE.search(text) or _DO_NOT_SHARE_AUTH_RE.search(text):
+    low = norm.lower()
+    if "do not share" in low and any(k in low for k in _DO_NOT_SHARE_KEYWORDS):
         return True
-    if _FAILED_OR_REQUEST_RE.search(text):
+    if _OTP_SECURITY_RE.search(norm):
         return True
-    return bool(_PROMO_SPAM_RE.search(text) and not _TXN_CUE_RE.search(text))
+    if _FAILED_OR_REQUEST_RE.search(norm):
+        return True
+    return bool(_PROMO_SPAM_RE.search(norm) and not _TXN_CUE_RE.search(norm))
 
 
 def scrub_sensitive_text(text: str) -> tuple[str, str]:
@@ -284,8 +294,7 @@ def scrub_sensitive_text(text: str) -> tuple[str, str]:
     available balances, and accidental secret/token values before persisting any
     SMS/notification/email text. Returns (clean_text, masked_acc).
     """
-    cleaned = (text or "").replace("\u00a0", " ").replace("\u202f", " ")
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = _normalize_ws(text)
     cleaned = _KNOWN_TOKEN_RE.sub("[TOKEN_REDACTED]", cleaned)
     cleaned = _SECRET_KV_RE.sub(lambda m: f"{m.group(1)}=[REDACTED]", cleaned)
     cleaned = _URL_RE.sub("[URL_REMOVED]", cleaned)
@@ -300,7 +309,7 @@ def scrub_sensitive_text(text: str) -> tuple[str, str]:
 
     # Strip available balance / credit limit so total account wealth is never stored in narrations
     cleaned = _BALANCE_CLAUSE_RE.sub("", cleaned)
-    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" .,-;|")
+    cleaned = " ".join(cleaned.split()).strip(" .,-;|")
     return cleaned[:320], masked_acc
 
 
@@ -349,7 +358,7 @@ def _resolve_app_name(app_hint: str | None, combined_text: str, sender_id: str |
 
 def _extract_amount(text: str) -> Decimal:
     # Balance clause is already stripped in scrubbed_text; double-guard defensively here too
-    candidate_text = _BALANCE_CLAUSE_RE.sub(" ", text)
+    candidate_text = _BALANCE_CLAUSE_RE.sub(" ", _normalize_ws(text))
     for pattern in (_AMOUNT_INR_RE, _AMOUNT_VERB_RE):
         match = pattern.search(candidate_text)
         if match:

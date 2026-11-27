@@ -174,15 +174,28 @@ def classify_transaction(narration: str, tx_type: str, mode: str, raw_app: str |
     return category, counterparty, app_name, vpa
 
 
+def _strip_parenthetical(text: str) -> str:
+    """Linear-time O(n) removal of (...) segments such as '(INR)' or '(Rs.)' without regex backtracking."""
+    out: list[str] = []
+    depth = 0
+    for ch in text:
+        if ch == "(":
+            depth += 1
+        elif ch == ")" and depth > 0:
+            depth -= 1
+        elif depth == 0:
+            out.append(ch)
+    return "".join(out)
+
+
 def _clean_col_key(raw_key: Any) -> str:
-    s = str(raw_key).strip().lower()
-    s = re.sub(r"\([^)]*\)", "", s)  # strip "(INR)", "(Rs.)", etc.
+    s = _strip_parenthetical(str(raw_key).strip().lower())
     s = re.sub(r"[./\-\s]+", "_", s).strip("_")
     return s
 
 
 _SUMMARY_NARRATION_RE = re.compile(
-    r"^(?:opening\s+balance|closing\s+balance|total\s+debits?|total\s+credits?|statement\s+summary|brought\s+forward|carried\s+forward)\b",
+    r"^(?:opening balance|closing balance|total debits?|total credits?|statement summary|brought forward|carried forward)\b",
     re.IGNORECASE,
 )
 
@@ -362,12 +375,12 @@ def _normalize_row(raw_row: dict[str, Any], index: int) -> dict[str, Any] | None
 
 
 _PDF_LINE_TX_REGEX = re.compile(
-    r"(?P<date>\d{4}-\d{2}-\d{2}|\d{2}[-/]\d{2}[-/]\d{4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{4})"
-    r"[\s|,\t]+"
-    r"(?P<narration>.+?)"
-    r"[\s|,\t]+"
-    r"(?:(?P<type>DEBIT|CREDIT|DR|CR|PAID|RECEIVED)[\s|,\t]+)?"
-    r"(?:INR|Rs\.?|₹)?\s*(?P<amount>[+-]?\d[\d,]*(?:\.\d{1,2})?)\s*(?P<suffix>CR|DR)?$",
+    r"^(?P<date>\d{4}-\d{2}-\d{2}|\d{2}[-/]\d{2}[-/]\d{4}|\d{1,2} [A-Za-z]{3} \d{4})"
+    r"[ |,\t]+"
+    r"(?P<narration>[^\n]{1,240}?)"
+    r"[ |,\t]+"
+    r"(?:(?P<type>DEBIT|CREDIT|DR|CR|PAID|RECEIVED)[ |,\t]+)?"
+    r"(?:(?:INR|Rs\.?|₹) ?)?(?P<amount>[+-]?\d[0-9,]{0,15}(?:\.\d{1,2})?)(?: ?(?P<suffix>CR|DR))?$",
     re.IGNORECASE,
 )
 
@@ -383,74 +396,177 @@ def _unescape_pdf_string(raw: str) -> str:
     )
 
 
+def _iter_pdf_raw_streams(pdf_bytes: bytes) -> list[bytes]:
+    """Linear-time O(n) scanner for raw PDF `stream ... endstream` payloads (no regex backtracking)."""
+    streams: list[bytes] = []
+    pos = 0
+    total = len(pdf_bytes)
+    while pos < total:
+        s_idx = pdf_bytes.find(b"stream", pos)
+        if s_idx == -1:
+            break
+        start = s_idx + 6
+        if start < total and pdf_bytes[start : start + 2] == b"\r\n":
+            start += 2
+        elif start < total and pdf_bytes[start : start + 1] == b"\n":
+            start += 1
+        else:
+            pos = start
+            continue
+        end = pdf_bytes.find(b"endstream", start)
+        if end == -1:
+            break
+        chunk = pdf_bytes[start:end]
+        if chunk.endswith(b"\r\n"):
+            chunk = chunk[:-2]
+        elif chunk.endswith((b"\n", b"\r")):
+            chunk = chunk[:-1]
+        streams.append(chunk)
+        pos = end + 9
+    return streams
+
+
+def _extract_pdf_text_operators(stream_str: str) -> list[str]:
+    """Single-pass O(n) extractor for PDF `(text) Tj` and `[(text)...] TJ` operators."""
+    chunks: list[str] = []
+    n = len(stream_str)
+    i = 0
+    in_array = False
+    arr_parts: list[str] = []
+
+    while i < n:
+        ch = stream_str[i]
+        if ch == "[" and not in_array:
+            in_array = True
+            arr_parts = []
+            i += 1
+        elif ch == "]" and in_array:
+            in_array = False
+            j = i + 1
+            while j < n and stream_str[j] in " \t\r\n":
+                j += 1
+            if stream_str[j : j + 2] == "TJ" and arr_parts:
+                chunks.append("".join(arr_parts))
+                i = j + 2
+            else:
+                i += 1
+            arr_parts = []
+        elif ch == "(":
+            # Parse PDF literal string handling backslash escapes and balanced parens in O(n)
+            depth = 1
+            i += 1
+            buf: list[str] = []
+            while i < n and depth > 0:
+                c = stream_str[i]
+                if c == "\\" and i + 1 < n:
+                    buf.append(c)
+                    buf.append(stream_str[i + 1])
+                    i += 2
+                    continue
+                if c == "(":
+                    depth += 1
+                elif c == ")":
+                    depth -= 1
+                    if depth == 0:
+                        i += 1
+                        break
+                buf.append(c)
+                i += 1
+            literal = _unescape_pdf_string("".join(buf))
+            if in_array:
+                arr_parts.append(literal)
+            else:
+                j = i
+                while j < n and stream_str[j] in " \t\r\n":
+                    j += 1
+                if stream_str[j : j + 2] == "Tj":
+                    chunks.append(literal)
+                    i = j + 2
+        else:
+            i += 1
+    return chunks
+
+
 def _extract_text_from_pdf_bytes(pdf_bytes: bytes, password: str | None = None) -> str:
     """
     Extracts readable text lines from a PDF statement (including password-protected Indian bank
-    statements) without writing uploaded statement bytes to disk.
-    Strategy: pypdf (if installed) -> poppler pdftotext -layout -> native FlateDecode stream fallback.
+    statements) without writing uploaded statement bytes to disk or passing user passwords
+    on any OS command line.
+    Strategy: in-memory pypdf decryption -> constant-argv poppler `pdftotext -layout - -`
+    -> pypdf extract_text -> linear-time FlateDecode stream fallback.
     """
+    plain_pdf_bytes = pdf_bytes
+    pypdf_text = ""
+
     try:
         import pypdf  # type: ignore[import-not-found]
+        from pypdf.errors import PyPdfError  # type: ignore[import-not-found]
+    except ImportError:
+        pypdf = None
+        PyPdfError = OSError  # type: ignore[misc, assignment]
 
-        reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
-        if reader.is_encrypted:
-            if not password:
+    if pypdf is not None:
+        try:
+            reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+            if reader.is_encrypted:
+                if not password:
+                    raise PDFPasswordRequiredError(
+                        "PDF is password-protected. Enter the PDF password to unlock and import."
+                    )
+                ok = reader.decrypt(password)
+                if not ok:
+                    raise PDFPasswordRequiredError(
+                        "Incorrect PDF password. Please check and try again."
+                    )
+                # Re-serialize decrypted pages strictly in memory so downstream layout extraction
+                # never receives user passwords on any command line.
+                writer = pypdf.PdfWriter()
+                for page in reader.pages:
+                    writer.add_page(page)
+                buf = io.BytesIO()
+                writer.write(buf)
+                plain_pdf_bytes = buf.getvalue()
+            pypdf_text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+        except PDFPasswordRequiredError:
+            raise
+        except (PyPdfError, OSError, ValueError):
+            if b"/Encrypt" in pdf_bytes:
                 raise PDFPasswordRequiredError(
-                    "PDF is password-protected. Enter the PDF password to unlock and import."
-                )
-            ok = reader.decrypt(password)
-            if not ok:
-                raise PDFPasswordRequiredError(
-                    "Incorrect PDF password. Please check and try again."
-                )
-        pages_text = [page.extract_text() or "" for page in reader.pages]
-        joined = "\n".join(pages_text).strip()
-        if joined:
-            return joined
-    except PDFPasswordRequiredError:
-        raise
-    except (ImportError, OSError, ValueError):
-        pass
+                    "PDF is password-protected or could not be unlocked with the provided password."
+                ) from None
+    elif b"/Encrypt" in pdf_bytes:
+        raise PDFPasswordRequiredError(
+            "PDF is password-protected. Install pypdf to unlock encrypted statements safely in memory."
+        )
 
     pdftotext_bin = shutil.which("pdftotext")
-    if pdftotext_bin:
-        cmd = [pdftotext_bin, "-layout"]
-        if password:
-            cmd.extend(["-upw", password])
-        cmd.extend(["-", "-"])
+    if pdftotext_bin and b"/Encrypt" not in plain_pdf_bytes:
         try:
+            # Fixed, constant command line — zero user-controlled arguments ever reach subprocess.
             proc = subprocess.run(
-                cmd,
-                input=pdf_bytes,
+                [pdftotext_bin, "-layout", "-", "-"],
+                input=plain_pdf_bytes,
                 capture_output=True,
                 timeout=20,
                 check=False,
             )
-            stderr_low = proc.stderr.decode("utf-8", errors="ignore").lower()
-            if proc.returncode == 3 or "incorrect password" in stderr_low or "password" in stderr_low:
-                raise PDFPasswordRequiredError(
-                    "Incorrect PDF password. Please check and try again."
-                    if password
-                    else "PDF is password-protected. Enter the PDF password to unlock and import."
-                )
             if proc.returncode == 0:
                 out_text = proc.stdout.decode("utf-8", errors="ignore").strip()
                 if out_text:
                     return out_text
-        except PDFPasswordRequiredError:
-            raise
         except (OSError, subprocess.SubprocessError):
             pass
 
-    if b"/Encrypt" in pdf_bytes:
+    if pypdf_text:
+        return pypdf_text
+
+    if b"/Encrypt" in plain_pdf_bytes:
         raise PDFPasswordRequiredError(
             "PDF is password-protected. Enter the PDF password to unlock and import."
         )
 
     extracted_chunks: list[str] = []
-    stream_pattern = re.compile(rb"stream\r?\n(.*?)\r?\nendstream", re.DOTALL)
-    for match in stream_pattern.finditer(pdf_bytes):
-        raw_stream = match.group(1)
+    for raw_stream in _iter_pdf_raw_streams(plain_pdf_bytes):
         decoded_stream = raw_stream
         for wbits in (zlib.MAX_WBITS, -zlib.MAX_WBITS):
             try:
@@ -460,36 +576,40 @@ def _extract_text_from_pdf_bytes(pdf_bytes: bytes, password: str | None = None) 
                 decoded_stream = raw_stream
 
         stream_str = decoded_stream.decode("latin-1", errors="ignore")
-        # Extract (text) Tj operators
-        for tj_match in re.finditer(r"\(((?:\\.|[^\\()])*)\)\s*Tj", stream_str):
-            extracted_chunks.append(_unescape_pdf_string(tj_match.group(1)))
-
-        # Extract [(text) ...] TJ array operators
-        for tj_arr in re.finditer(r"\[(.*?)\]\s*TJ", stream_str, re.DOTALL):
-            parts = [
-                _unescape_pdf_string(p.group(1))
-                for p in re.finditer(r"\(((?:\\.|[^\\()])*)\)", tj_arr.group(1))
-            ]
-            if parts:
-                extracted_chunks.append("".join(parts))
+        extracted_chunks.extend(_extract_pdf_text_operators(stream_str))
 
     if extracted_chunks:
         return "\n".join(extracted_chunks)
 
-    return pdf_bytes.decode("utf-8", errors="ignore")
+    return plain_pdf_bytes.decode("utf-8", errors="ignore")
 
 
 _PDF_DATE_START_RE = re.compile(
     r"^(?P<date>"
     r"\d{4}-\d{2}-\d{2}"
     r"|\d{2}[-/.]\d{2}[-/.]\d{2,4}"
-    r"|\d{1,2}[-\s]+[A-Za-z]{3}[-\s,]+(?:\d{4}|\d{2})"
-    r"|[A-Za-z]{3}\s+\d{1,2},\s+\d{4}"
+    r"|\d{1,2}[- ][A-Za-z]{3}(?:[- ]|, )(?:\d{4}|\d{2})"
+    r"|[A-Za-z]{3} \d{1,2}, \d{4}"
     r")\b",
 )
-_PDF_MONEY_TOKEN_RE = re.compile(r"(?:(?:₹|Rs\.?|INR)\s*)?([+-]?\d{1,3}(?:,\d{2,3})*\.\d{2}|[+-]?\d+\.\d{2})(?:\s*(CR|DR))?\b", re.IGNORECASE)
-_PDF_CURRENCY_MONEY_RE = re.compile(r"(?:₹|Rs\.?|INR)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)", re.IGNORECASE)
-_PDF_UTR_RE = re.compile(r"(?:UTR(?:\s*No\.?)?|Transaction\s*ID|Txn\s*ID|Ref(?:\s*No\.?)?)\s*[:#\-]?\s*([A-Za-z0-9]{8,28})", re.IGNORECASE)
+_PDF_MONEY_TOKEN_RE = re.compile(
+    r"(?:(?:₹|Rs\.?|INR) ?)?"
+    r"(?<!\d)([+-]?(?:\d{1,3}(?:,\d{2,3}){1,4}|\d{1,12})\.\d{2})"
+    r"(?: ?(CR|DR))?\b",
+    re.IGNORECASE,
+)
+_PDF_CURRENCY_MONEY_RE = re.compile(
+    r"(?:₹|Rs\.?|INR) ?([0-9][0-9,]{0,15}(?:\.[0-9]{1,2})?)",
+    re.IGNORECASE,
+)
+_PDF_UTR_RE = re.compile(
+    r"\b(?:UTR(?: No\.?)?|Transaction ID|Txn ID|Ref(?: No\.?)?)(?: ?[:#\-] ?| )([A-Za-z0-9]{8,28})\b",
+    re.IGNORECASE,
+)
+
+
+def _collapse_ws(text: str) -> str:
+    return " ".join(text.split())
 
 
 def _parse_phonepe_paytm_pdf_blocks(lines: list[str]) -> list[dict[str, Any]]:
@@ -497,19 +617,20 @@ def _parse_phonepe_paytm_pdf_blocks(lines: list[str]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     idx = 0
     while idx < len(lines):
-        dm = _PDF_DATE_START_RE.match(lines[idx])
+        norm_line = _collapse_ws(lines[idx])
+        dm = _PDF_DATE_START_RE.match(norm_line)
         if not dm:
             idx += 1
             continue
         date_val = dm.group("date")
-        block: list[str] = [lines[idx]]
+        block: list[str] = [norm_line]
         look = idx + 1
-        while look < min(len(lines), idx + 9) and not _PDF_DATE_START_RE.match(lines[look]):
-            block.append(lines[look])
+        while look < min(len(lines), idx + 9) and not _PDF_DATE_START_RE.match(_collapse_ws(lines[look])):
+            block.append(_collapse_ws(lines[look]))
             look += 1
         joined = " | ".join(block)
         has_upi_cue = bool(
-            re.search(r"\b(?:DEBIT|CREDIT|Paid\s+to|Received\s+from|Sent\s+to|Money\s+sent|Payment\s+to)\b", joined, re.IGNORECASE)
+            re.search(r"\b(?:DEBIT|CREDIT|Paid to|Received from|Sent to|Money sent|Payment to)\b", joined, re.IGNORECASE)
             and _PDF_CURRENCY_MONEY_RE.search(joined)
         )
         if not has_upi_cue:
@@ -521,19 +642,19 @@ def _parse_phonepe_paytm_pdf_blocks(lines: list[str]) -> list[dict[str, Any]]:
             idx = look
             continue
         amount_val = amt_m.group(1)
-        tx_type = "CREDIT" if re.search(r"\b(?:CREDIT|Received\s+from|Cashback\s+received|Refund)\b", joined, re.IGNORECASE) else "DEBIT"
+        tx_type = "CREDIT" if re.search(r"\b(?:CREDIT|Received from|Cashback received|Refund)\b", joined, re.IGNORECASE) else "DEBIT"
         utr_m = _PDF_UTR_RE.search(joined)
         first_line_rest = block[0][dm.end():].strip()
         first_line_rest = _PDF_CURRENCY_MONEY_RE.sub("", first_line_rest)
         first_line_rest = re.sub(r"\b(?:DEBIT|CREDIT)\b", "", first_line_rest, flags=re.IGNORECASE).strip(" |-,\t")
         narr_parts = ([first_line_rest] if first_line_rest else []) + [
             ln for ln in block[1:]
-            if not re.match(r"^\d{1,2}:\d{2}\s*(?:AM|PM)?$", ln, re.IGNORECASE)
+            if not re.match(r"^\d{1,2}:\d{2}(?: ?(?:AM|PM))?$", ln, re.IGNORECASE)
             and not re.match(r"^(?:DEBIT|CREDIT)$", ln, re.IGNORECASE)
-            and not re.match(r"^(?:₹|Rs\.?|INR)\s*[0-9,]+(?:\.[0-9]{1,2})?$", ln, re.IGNORECASE)
+            and not re.match(r"^(?:₹|Rs\.?|INR) ?[0-9,]{1,16}(?:\.[0-9]{1,2})?$", ln, re.IGNORECASE)
         ]
-        narration = " ".join(narr_parts).strip() or lines[idx]
-        app_hint = "PhonePe" if "phonepe" in joined.lower() or re.search(r"\bT\d{14,}\b", joined) else ("Paytm" if "paytm" in joined.lower() else "")
+        narration = " ".join(narr_parts).strip() or norm_line
+        app_hint = "PhonePe" if "phonepe" in joined.lower() or re.search(r"\bT\d{14,28}\b", joined) else ("Paytm" if "paytm" in joined.lower() else "")
         norm = _normalize_row(
             {
                 "date": date_val,
@@ -560,12 +681,13 @@ def _parse_multiline_bank_pdf_rows(lines: list[str]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     idx = 0
     while idx < len(lines):
-        dm = _PDF_DATE_START_RE.match(lines[idx])
+        norm_line = _collapse_ws(lines[idx])
+        dm = _PDF_DATE_START_RE.match(norm_line)
         if not dm:
             idx += 1
             continue
         date_val = dm.group("date")
-        rest = lines[idx][dm.end():].strip()
+        rest = norm_line[dm.end():].strip()
         # Strip optional second Value Date right after Txn Date
         dm2 = _PDF_DATE_START_RE.match(rest)
         if dm2:
@@ -574,13 +696,13 @@ def _parse_multiline_bank_pdf_rows(lines: list[str]) -> list[dict[str, Any]]:
         merged = [rest] if rest else []
         look = idx + 1
         while look < min(len(lines), idx + 4):
-            nxt = lines[look]
-            if _PDF_DATE_START_RE.match(nxt) or re.match(r"^(?:page\s+\d+|statement\s+summary|opening\s+balance|closing\s+balance)", nxt, re.IGNORECASE):
+            nxt = _collapse_ws(lines[look])
+            if _PDF_DATE_START_RE.match(nxt) or re.match(r"^(?:page \d{1,5}|statement summary|opening balance|closing balance)", nxt, re.IGNORECASE):
                 break
             merged.append(nxt)
             look += 1
 
-        full_text = " ".join(merged).strip()
+        full_text = _collapse_ws(" ".join(merged))
         if not full_text or _SUMMARY_NARRATION_RE.match(full_text):
             idx = look
             continue
@@ -655,7 +777,7 @@ def _parse_pdf_statement_text(extracted_text: str) -> list[dict[str, Any]]:
     # 3. Line-by-line regex extraction for single-line PDF statement rows
     rows: list[dict[str, Any]] = []
     for idx, ln in enumerate(lines):
-        m = _PDF_LINE_TX_REGEX.search(ln)
+        m = _PDF_LINE_TX_REGEX.search(_collapse_ws(ln)[:320])
         if not m:
             continue
         date_val = m.group("date")
@@ -774,15 +896,15 @@ class _HTMLTextExtractor(HTMLParser):
 
 
 _TAKEOUT_ACTION_RE = re.compile(
-    r"^(Paid|Sent|Received)\s+(?:₹|Rs\.?|INR)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)"
-    r"(?:\s+(?:to|from)\s+(.+?))?(?:\s+using\s+(.+))?$",
+    r"^(Paid|Sent|Received) (?:₹|Rs\.?|INR) ?([0-9][0-9,]{0,15}(?:\.[0-9]{1,2})?)"
+    r"(?: (?:to|from) ([^\n]{1,120}?))?(?: using ([^\n]{1,120}))?$",
     re.IGNORECASE,
 )
 _TAKEOUT_DATE_RE = re.compile(
-    r"^(?:[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}|\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4}|\d{4}-\d{2}-\d{2})"
+    r"^(?:[A-Z][a-z]{2} \d{1,2}, \d{4}|\d{1,2} [A-Z][a-z]{2} \d{4}|\d{4}-\d{2}-\d{2})"
 )
-_TAKEOUT_TXN_ID_RE = re.compile(r"(?:Transaction ID|UPI Ref(?:\s*No)?)\s*[:\-]?\s*([A-Za-z0-9._-]{6,64})", re.IGNORECASE)
-_TAKEOUT_ACC_TAIL_RE = re.compile(r"(?:[x*]{3,}|Account\s+[x*\d]*)(\d{4})\b", re.IGNORECASE)
+_TAKEOUT_TXN_ID_RE = re.compile(r"\b(?:Transaction ID|UPI Ref(?: No)?)(?: ?[:\-] ?| )([A-Za-z0-9._-]{6,64})\b", re.IGNORECASE)
+_TAKEOUT_ACC_TAIL_RE = re.compile(r"(?:[x*]{3,16}|Account [x*\d]{0,16})(\d{4})\b", re.IGNORECASE)
 
 
 def _parse_google_takeout_html(html_text: str) -> list[dict[str, Any]]:
