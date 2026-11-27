@@ -66,12 +66,13 @@ export function LoginPage() {
     setIsSendingOtp(true);
     setOtpValue(''); // Never auto-fill; user enters the 6-digit code manually
     try {
-      const params = new URLSearchParams({
-        phone: boundTarget,
-        purpose: 'LOGIN',
-      });
-      const res = await fetch(`/api/v1/auth/otp/send?${params.toString()}`, {
+      const res = await fetch('/api/v1/auth/otp/send', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: boundTarget,
+          purpose: 'LOGIN',
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Failed to dispatch OTP' }));

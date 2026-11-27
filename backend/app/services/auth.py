@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cores.config import settings
 from app.cores.database import get_db
+from app.cores.rls import bind_rls_user_context
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
 
@@ -96,6 +97,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     user = result.scalar_one_or_none()
     if user is None or not getattr(user, "is_active", True):
         raise credentials_exception
+    await bind_rls_user_context(db, user.id)
     return user
 
 

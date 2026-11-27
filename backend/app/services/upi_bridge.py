@@ -1,12 +1,16 @@
 """
-Zero-Credential UPI Auto-Sync Bridge Service.
+Zero-Credential Indian Bank SMS & UPI Auto-Sync Bridge Service.
 
-Implements real-world client-side / webhook ingestion patterns for Google Pay,
-Paytm, PhonePe, and bank UPI alerts without ever requesting, storing, or leaking
-UPI PINs, bank netbanking passwords, or Gmail/Google OAuth credentials:
+Implements real-world client-side / webhook ingestion patterns for Indian Bank SMS
+(HDFC, SBI, ICICI, Axis, Kotak, PNB, BOB, IndusInd, Yes Bank) and UPI notifications
+(Google Pay, Paytm, PhonePe, BHIM, CRED, Amazon Pay) without ever requesting,
+storing, or leaking UPI PINs, netbanking passwords, card CVVs, PAN/Aadhaar, or
+available bank balances:
   1. Scoped, revocable per-user HMAC ingest tokens (X-Ingest-Token header only).
-  2. Strict pre-persistence OTP / PIN / CVV blocker & raw account number scrubber.
-  3. Idempotent ingestion into BankTransaction + live SSE stream broadcast.
+  2. Layer 0 TRAI DLT sender gate + strict OTP / PIN / CVV / promo / failed-txn / collect-request blocker.
+  3. Zero-leak scrubber stripping account numbers, card numbers, PAN, Aadhaar, URLs, API tokens, and Avl Bal.
+  4. Real Indian bank SMS grammar with exact Decimal math and historical date extraction for time-series analytics.
+  5. Idempotent single & batch ingestion into BankTransaction + UnifiedTransaction + live SSE broadcast.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ import re
 import secrets
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -26,6 +31,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cores.config import settings
+from app.cores.money import ZERO, money_to_float, to_money
 from app.models.banking_consent import PaymentWebhookEvent
 from app.services.classifier import classify_hierarchical, to_legacy_bank_label
 from app.services.event_bus import publish_event
@@ -46,50 +52,114 @@ APP_PACKAGE_MAP: dict[str, str] = {
     "gmail_apps_script": "Gmail Auto-Sync",
     "ios_shortcut": "iOS Shortcut",
     "android_sms": "SMS Bridge",
+    "manual_sms_paste": "Bank SMS",
+}
+
+# TRAI DLT 6-character bank & UPI transactional sender IDs
+DLT_BANK_SENDER_MAP: dict[str, str] = {
+    "HDFCBK": "HDFC Bank",
+    "HDFCBN": "HDFC Bank",
+    "HDFACC": "HDFC Bank",
+    "SBIBNK": "SBI",
+    "SBIINB": "SBI",
+    "SBIUPI": "SBI",
+    "SBIPSG": "SBI",
+    "SBICRD": "SBI",
+    "ICICIB": "ICICI Bank",
+    "ICICIP": "ICICI Bank",
+    "AXISBK": "Axis Bank",
+    "AXISMB": "Axis Bank",
+    "KOTAKB": "Kotak Bank",
+    "KOTAKM": "Kotak Bank",
+    "PNBSMS": "PNB",
+    "BOBTXN": "Bank of Baroda",
+    "INDUSB": "IndusInd Bank",
+    "YESBNK": "Yes Bank",
+    "IDFCFB": "IDFC First Bank",
+    "FEDBNK": "Federal Bank",
+    "CANBNK": "Canara Bank",
+    "PAYTMB": "Paytm",
+    "PYTMBC": "Paytm",
+    "PHONPE": "PhonePe",
+    "GPAYIN": "Google Pay",
+    "AMAZON": "Amazon Pay",
+    "CREDCL": "CRED",
 }
 
 _OTP_SECURITY_RE = re.compile(
     r"\b(?:otp|one[\s-]?time[\s-]?password|verification\s+code|security\s+code|"
-    r"auth(?:entication)?\s+code|login\s+code|passcode|mpin|upi\s*pin|atm\s*pin|tpin|cvv|cvc)\b",
+    r"auth(?:entication)?\s+code|login\s+code|passcode|mpin|upi\s*pin|atm\s*pin|tpin|cvv|cvc|"
+    r"secret\s+code|2fa\s+code)\b",
     re.IGNORECASE,
 )
 _DO_NOT_SHARE_AUTH_RE = re.compile(
-    r"(?:\bdo\s+not\s+share\b.*\b(?:code|otp|pin|password|cvv)\b|"
-    r"\b(?:code|otp|pin|password|cvv)\b.*\bdo\s+not\s+share\b)",
+    r"(?:\bdo\s+not\s+share\b.*\b(?:code|otp|pin|password|cvv|mpin)\b|"
+    r"\b(?:code|otp|pin|password|cvv|mpin)\b.*\bdo\s+not\s+share\b)",
     re.IGNORECASE,
 )
 _PROMO_SPAM_RE = re.compile(
-    r"\b(?:scratch\s+card|win\s+up\s+to|cashback\s+offer|flat\s+\d+%\s+off|apply\s+now|loan\s+approved)\b",
+    r"\b(?:scratch\s+card|win\s+up\s+to|cashback\s+offer|flat\s+\d+%\s+off|apply\s+now|"
+    r"loan\s+approved|pre[\s-]?approved\s+loan|kyc\s+(?:pending|expir|update)|"
+    r"credit\s+limit\s+upgrade|personal\s+loan|congratulations!?\s+you)\b",
+    re.IGNORECASE,
+)
+_FAILED_OR_REQUEST_RE = re.compile(
+    r"\b(?:failed|declined|unsuccessful|could\s+not\s+be\s+processed|insufficient\s+(?:funds|balance)|"
+    r"collect\s+request|has\s+requested\s+(?:rs\.?|inr|₹)?\s*\d|requested\s+money|"
+    r"payment\s+request\s+of|mandate\s+(?:created|registered|upcoming)|autopay\s+(?:scheduled|reminder)|"
+    r"due\s+on\s+\d|bill\s+is\s+due|will\s+be\s+auto[\s-]?debited|not\s+successful)\b",
     re.IGNORECASE,
 )
 _TXN_CUE_RE = re.compile(
-    r"\b(?:paid|received|debited|credited|sent|withdrawn|deposited|transferred|upi/dr|upi/cr)\b",
+    r"\b(?:paid|received|debited|credited|sent|spent|withdrawn|deposited|transferred|upi/dr|upi/cr)\b",
     re.IGNORECASE,
 )
 _CREDIT_CUE_RE = re.compile(
-    r"\b(?:credited|received|paid\s+you|sent\s+you|added\s+to|refund\s+from|cashback\s+credited|upi/cr/)\b",
+    r"\b(?:credited|received|paid\s+you|sent\s+you|added\s+to|deposited|refund\s+(?:of|from)|"
+    r"cashback\s+credited|upi/cr/)\b",
     re.IGNORECASE,
 )
 _DEBIT_CUE_RE = re.compile(
-    r"\b(?:debited|paid\s+to|paid|sent\s+to|sent|spent|transferred\s+to|withdrawn|purchase\s+at|upi/dr/)\b",
+    r"\b(?:debited|paid\s+to|paid|sent\s+to|sent|spent|transferred\s+to|withdrawn|"
+    r"purchase\s+at|upi/dr/)\b",
     re.IGNORECASE,
 )
+
+# Balance / credit-limit clause stripped BEFORE amount extraction & before persisting narration
+_BALANCE_CLAUSE_RE = re.compile(
+    r"(?:(?:avl\.?|avail(?:able)?|closing|clear|ledger|updated|current)?\s*"
+    r"(?:bal(?:ance)?|lmt|limit)\s*(?:is|as\s+on\s+\S+)?\s*[:\-]?\s*"
+    r"(?:inr|rs\.?|₹)?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)",
+    re.IGNORECASE,
+)
+
 _AMOUNT_INR_RE = re.compile(
     r"(?:rs\.?|inr|₹)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)",
     re.IGNORECASE,
 )
 _AMOUNT_VERB_RE = re.compile(
-    r"\b(?:paid|received|debited|credited|sent)\s+(?:rs\.?|inr|₹)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)",
+    r"\b(?:paid|received|debited(?:\s+by|\s+for|\s+with)?|credited(?:\s+by|\s+with)?|sent|spent|withdrawn)\s+"
+    r"(?:rs\.?|inr|₹)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)",
     re.IGNORECASE,
 )
 _UTR_LABELED_RE = re.compile(
-    r"(?:utr|upi\s*ref(?:\s*no)?|ref(?:\s*no)?|upi\s*transaction\s*id|transaction\s*id|txn\s*id)\s*[:#\-]?\s*([A-Z0-9]{8,24})",
+    r"(?:utr(?:\s*no\.?)?|upi\s*ref(?:\s*no\.?)?|ref(?:\s*no\.?|no)?|upi\s*transaction\s*id|"
+    r"transaction\s*id|txn\s*id|imps\s*ref(?:\s*no\.?)?)\s*[:#\-]?\s*([A-Z0-9]{8,24})",
     re.IGNORECASE,
 )
-_UTR_SLASH_RE = re.compile(r"UPI/(?:DR|CR)/(\d{10,16})", re.IGNORECASE)
+_UTR_SLASH_RE = re.compile(r"UPI/(?:DR|CR|P2M|P2P|P2A)/(\d{8,16})", re.IGNORECASE)
+_UTR_UPI_COLON_RE = re.compile(r"\bUPI[:/](\d{8,16})\b", re.IGNORECASE)
 _UTR_12DIGIT_RE = re.compile(r"\b(\d{12})\b")
 
-# Scrubbing patterns
+# Date patterns inside real Indian bank SMS messages
+_SMS_DATE_PATTERNS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
+    (re.compile(r"\b(\d{4}-\d{2}-\d{2})\b"), ("%Y-%m-%d",)),
+    (re.compile(r"\b(\d{1,2}[-/][A-Za-z]{3}[-/]\d{2,4})\b"), ("%d-%b-%Y", "%d-%b-%y", "%d/%b/%Y", "%d/%b/%y")),
+    (re.compile(r"\b(\d{1,2}[A-Za-z]{3}\d{2,4})\b"), ("%d%b%Y", "%d%b%y")),
+    (re.compile(r"\b(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b"), ("%d-%m-%Y", "%d-%m-%y", "%d/%m/%Y", "%d/%m/%y")),
+)
+
+# Zero-leak credential & PII scrubbing patterns
 _ACCOUNT_RAW_RE = re.compile(
     r"(\b(?:a/c|ac|acct?|account|card)\s*(?:no\.?|number|ending|#)?\s*[:\-]?\s*)"
     r"([x*\-\s\d]{4,18}?)(\d{4})\b",
@@ -97,14 +167,30 @@ _ACCOUNT_RAW_RE = re.compile(
 )
 _CARD_GROUPED_RE = re.compile(r"\b(?:\d{4}[-\s]?){3}(\d{4})\b")
 _LONG_RAW_DIGITS_RE = re.compile(r"\b\d{13,19}\b")
-_MASKED_ACC_EXTRACT_RE = re.compile(r"(?:[x*]{2,}[-\s]*|XXXX-XXXX-)(\d{4})\b", re.IGNORECASE)
+_MASKED_ACC_EXTRACT_RE = re.compile(r"(?:[x*]{2,}[-\s]*|XXXX-XXXX-)(\d{3,4})\b", re.IGNORECASE)
 _SECRET_KV_RE = re.compile(
-    r"\b(password|passwd|mpin|upi[_\s]?pin|cvv|cvc|bearer)\s*[:=]\s*[^\s,;]+",
+    r"\b(password|passwd|mpin|upi[_\s]?pin|tpin|cvv|cvc|bearer|token|api[_\s]?key|secret)\s*[:=]\s*[^\s,;]+",
     re.IGNORECASE,
 )
+_KNOWN_TOKEN_RE = re.compile(
+    r"\b(?:vk_upi_[A-Za-z0-9_\-.]+|rzp_(?:live|test)_[A-Za-z0-9]+|AIza[0-9A-Za-z\-_]{20,}|"
+    r"sk_[A-Za-z0-9_\-]{16,}|ghp_[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)\b"
+)
+_PAN_RE = re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b")
+_AADHAAR_SPACED_RE = re.compile(r"\b\d{4}\s+\d{4}\s+\d{4}\b")
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+
 _TO_FROM_COUNTERPARTY_RE = re.compile(
-    r"\b(?:paid\s+to|sent\s+to|transferred\s+to|received\s+from|from|to)\s+"
-    r"([A-Za-z0-9&._@\- ]{2,45}?)(?=\s+(?:via|using|on|ref|utr|upi|from|at|for|with|a/c)\b|\s*[.,;\n—–|]|$)",
+    r"\b(?:paid\s+to|sent\s+to|transferred\s+to|trf\s+to|transfer\s+to|received\s+from|spent\s+at|at|from|to)\s+"
+    r"([A-Za-z0-9&._@\- ]{2,45}?)(?=\s+(?:via|using|on|ref|refno|utr|upi|from|at|for|with|a/c|bal|avl|date)\b|\s*[.,;\n—–|]|$)",
+    re.IGNORECASE,
+)
+_UPI_SLASH_PARTY_RE = re.compile(
+    r"UPI/(?:DR|CR|P2M|P2P|P2A)/\d{8,16}/([^/.;\n]{2,45})",
+    re.IGNORECASE,
+)
+_ICICI_SEMI_PARTY_RE = re.compile(
+    r";\s*([A-Za-z0-9&._\- ]{2,40}?)\s+(?:credited|debited)\b",
     re.IGNORECASE,
 )
 _PAID_YOU_RE = re.compile(r"^\s*([A-Za-z0-9&._\- ]{2,40}?)\s+(?:paid|sent)\s+you\b", re.IGNORECASE)
@@ -163,37 +249,68 @@ def mask_token_preview(token: str) -> str:
     return f"{token[:10]}...{token[-6:]}"
 
 
-def is_security_or_otp_message(text: str) -> bool:
-    """Return True if the alert contains OTPs, PINs, CVVs, or promo non-transactional noise."""
+def _resolve_dlt_sender(sender_id: str | None) -> tuple[str | None, bool]:
+    """
+    Parses a TRAI DLT SMS header such as `AD-HDFCBK-S`, `VM-SBIUPI`, or `JX-PROMO-P`.
+    Returns `(bank_name_or_none, is_promotional_header)`.
+    """
+    raw = (sender_id or "").strip().upper()
+    if not raw:
+        return None, False
+    is_promo = raw.endswith("-P") or bool(re.match(r"^[A-Z]{2}-\d{6}$", raw))
+    # Strip leading 2-letter telecom prefix (AD-, VM-, JX-, AX-, JD-, TM-, BP-, VK-) and trailing -S/-T/-P/-G
+    core = re.sub(r"^[A-Z]{2}-", "", raw)
+    core = re.sub(r"-[STPG]$", "", core)
+    return DLT_BANK_SENDER_MAP.get(core), is_promo
+
+
+def is_security_or_otp_message(text: str, sender_id: str | None = None) -> bool:
+    """Return True if the alert contains OTPs, PINs, CVVs, promo spam, or failed/collect requests."""
+    _, is_promo_header = _resolve_dlt_sender(sender_id)
+    if is_promo_header:
+        return True
     if not text:
         return False
     if _OTP_SECURITY_RE.search(text) or _DO_NOT_SHARE_AUTH_RE.search(text):
+        return True
+    if _FAILED_OR_REQUEST_RE.search(text):
         return True
     return bool(_PROMO_SPAM_RE.search(text) and not _TXN_CUE_RE.search(text))
 
 
 def scrub_sensitive_text(text: str) -> tuple[str, str]:
     """
-    Remove raw bank account numbers, card numbers, and accidental secret key/value pairs
-    before persisting any notification/SMS/email text. Returns (clean_text, masked_acc).
+    Remove raw bank account numbers, card numbers, PAN, spaced Aadhaar, URLs,
+    available balances, and accidental secret/token values before persisting any
+    SMS/notification/email text. Returns (clean_text, masked_acc).
     """
-    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    cleaned = (text or "").replace("\u00a0", " ").replace("\u202f", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = _KNOWN_TOKEN_RE.sub("[TOKEN_REDACTED]", cleaned)
     cleaned = _SECRET_KV_RE.sub(lambda m: f"{m.group(1)}=[REDACTED]", cleaned)
+    cleaned = _URL_RE.sub("[URL_REMOVED]", cleaned)
+    cleaned = _PAN_RE.sub("[PAN_REDACTED]", cleaned)
+    cleaned = _AADHAAR_SPACED_RE.sub("[ID_REDACTED]", cleaned)
     cleaned = _ACCOUNT_RAW_RE.sub(lambda m: f"{m.group(1)}XXXX-XXXX-{m.group(3)}", cleaned)
     cleaned = _CARD_GROUPED_RE.sub(lambda m: f"XXXX-XXXX-{m.group(1)}", cleaned)
     cleaned = _LONG_RAW_DIGITS_RE.sub(lambda m: f"XXXX-XXXX-{m.group(0)[-4:]}", cleaned)
 
     acc_match = _MASKED_ACC_EXTRACT_RE.search(cleaned)
-    masked_acc = f"XXXX-XXXX-{acc_match.group(1)}" if acc_match else "Account Masked"
+    masked_acc = f"XXXX-XXXX-{acc_match.group(1).zfill(4)}" if acc_match else "Account Masked"
+
+    # Strip available balance / credit limit so total account wealth is never stored in narrations
+    cleaned = _BALANCE_CLAUSE_RE.sub("", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" .,-;|")
     return cleaned[:320], masked_acc
 
 
-def _resolve_app_name(app_hint: str | None, combined_text: str) -> str:
+def _resolve_app_name(app_hint: str | None, combined_text: str, sender_id: str | None = None) -> str:
+    dlt_bank, _ = _resolve_dlt_sender(sender_id)
     low_hint = (app_hint or "").strip().lower()
-    if low_hint in APP_PACKAGE_MAP:
+    if low_hint in APP_PACKAGE_MAP and low_hint not in ("android_sms", "manual_sms_paste"):
         return APP_PACKAGE_MAP[low_hint]
     for pkg, friendly in APP_PACKAGE_MAP.items():
-        if pkg in low_hint:
+        if pkg in low_hint and pkg not in ("android_sms", "manual_sms_paste"):
             return friendly
 
     # Delegate VPA handle / generic channel detection to payment_recorder.detect_upi_app
@@ -212,49 +329,105 @@ def _resolve_app_name(app_hint: str | None, combined_text: str) -> str:
         return "PhonePe"
     if "bhim" in low_text:
         return "BHIM UPI"
+    if dlt_bank:
+        return dlt_bank
+    for bank_kw, label in (
+        ("hdfc", "HDFC Bank"),
+        ("icici", "ICICI Bank"),
+        ("axis bank", "Axis Bank"),
+        ("kotak", "Kotak Bank"),
+        ("sbi", "SBI"),
+    ):
+        if bank_kw in low_text:
+            return label
+    if low_hint in APP_PACKAGE_MAP:
+        return APP_PACKAGE_MAP[low_hint]
     if app_hint and app_hint.strip() and "." not in app_hint and low_hint not in ("android_notification", "webhook"):
         return app_hint.strip()[:50]
     return "UPI Bridge"
 
 
-def _extract_amount(text: str) -> float:
+def _extract_amount(text: str) -> Decimal:
+    # Balance clause is already stripped in scrubbed_text; double-guard defensively here too
+    candidate_text = _BALANCE_CLAUSE_RE.sub(" ", text)
     for pattern in (_AMOUNT_INR_RE, _AMOUNT_VERB_RE):
-        match = pattern.search(text)
+        match = pattern.search(candidate_text)
         if match:
             try:
-                val = float(match.group(1).replace(",", ""))
-                if val > 0:
-                    return round(val, 2)
+                val = to_money(match.group(1).replace(",", ""))
+                if val > ZERO:
+                    return val
             except ValueError:
                 continue
-    return 0.0
+    return ZERO
+
+
+def _extract_sms_date(text: str) -> datetime | None:
+    """Extracts transaction date embedded in Indian bank SMS (e.g. 26/11/26, 26Nov26, 12-Jun-26)."""
+    for pattern, fmts in _SMS_DATE_PATTERNS:
+        m = pattern.search(text)
+        if not m:
+            continue
+        raw_d = m.group(1).strip()
+        for fmt in fmts:
+            try:
+                parsed = datetime.strptime(raw_d, fmt)
+                if 2018 <= parsed.year <= 2035:
+                    return parsed.replace(tzinfo=UTC)
+            except ValueError:
+                continue
+    return None
 
 
 def _extract_utr(text: str) -> str | None:
-    for pattern in (_UTR_LABELED_RE, _UTR_SLASH_RE, _UTR_12DIGIT_RE):
+    for pattern in (_UTR_LABELED_RE, _UTR_SLASH_RE, _UTR_UPI_COLON_RE, _UTR_12DIGIT_RE):
         match = pattern.search(text)
         if match:
             candidate = match.group(1).strip()
-            # Guard against matching a 4-digit masked account tail or year
             if len(candidate) >= 8:
                 return candidate
     return None
 
 
 def _extract_counterparty_override(title: str, scrubbed_text: str) -> str | None:
+    upi_slash = _UPI_SLASH_PARTY_RE.search(scrubbed_text)
+    if upi_slash:
+        cand = upi_slash.group(1).strip(" :-")
+        if cand and not cand.isdigit():
+            return cand[:150]
+
+    icici_semi = _ICICI_SEMI_PARTY_RE.search(scrubbed_text)
+    if icici_semi:
+        cand = icici_semi.group(1).strip(" :-")
+        if cand and not any(b in cand.lower() for b in ("acct", "a/c", "account")):
+            return cand[:150]
+
     paid_you = _PAID_YOU_RE.search(scrubbed_text)
     if paid_you:
         name = paid_you.group(1).strip(" :-")
         if name and not name.lower().startswith(("you", "your", "rs", "inr")):
-            return name
+            return name[:150]
 
     for match in _TO_FROM_COUNTERPARTY_RE.finditer(scrubbed_text):
         candidate = match.group(1).strip(" :-")
         low = candidate.lower()
         if candidate and not any(
-            bad in low for bad in ("your ", "a/c", "acct", "account", "hdfc bank", "sbi ", "icici ", "axis bank", "kotak")
+            bad in low
+            for bad in (
+                "your ",
+                "a/c",
+                "acct",
+                "account",
+                "hdfc bank",
+                "sbi ",
+                "icici ",
+                "axis bank",
+                "kotak",
+                "vpa ",
+                "mobile",
+            )
         ):
-            return candidate
+            return candidate[:150]
 
     clean_title = (title or "").strip()
     if (
@@ -262,10 +435,27 @@ def _extract_counterparty_override(title: str, scrubbed_text: str) -> str | None
         and 2 <= len(clean_title) <= 45
         and not any(
             k in clean_title.lower()
-            for k in ("paid", "received", "debited", "credited", "google pay", "paytm", "phonepe", "₹", "rs")
+            for k in (
+                "paid",
+                "received",
+                "debited",
+                "credited",
+                "google pay",
+                "paytm",
+                "phonepe",
+                "hdfc",
+                "icici",
+                "sbi",
+                "axis",
+                "kotak",
+                "sms",
+                "alert",
+                "₹",
+                "rs",
+            )
         )
     ):
-        return clean_title
+        return clean_title[:150]
     return None
 
 
@@ -274,49 +464,73 @@ def parse_upi_alert_payload(
     message: str = "",
     title: str = "",
     app_package: str = "",
+    sender_id: str = "",
     source_channel: str = "android_notification",
     txn_id: str | None = None,
     timestamp: datetime | None = None,
-    amount: float | None = None,
+    amount: Decimal | float | None = None,
     direction: str | None = None,
     counterparty: str | None = None,
     category: str | None = None,
     subcategory: str | None = None,
 ) -> dict[str, Any]:
     """
-    Thin connector parser & sanitizer for optional external UPI webhook/alert events.
-    Filters OTP/security codes, scrubs sensitive credentials, normalizes into the
-    canonical schema, and classifies through `classifier.classify_hierarchical`.
+    Zero-credential parser & sanitizer for Indian bank SMS, UPI notifications, and Gmail alerts.
+    Blocks OTPs/PINs/promos/failed/collect requests, scrubs sensitive credentials & account balances,
+    extracts exact Decimal amounts and real SMS dates, and classifies hierarchically.
     """
     raw_combined = f"{title.strip()} — {message.strip()}".strip(" —")
-    if not raw_combined and not (amount and amount > 0 and direction):
+    if not raw_combined and not (amount and to_money(amount) > ZERO and direction):
         return {"accepted": False, "reason": "empty_alert_payload"}
 
-    if raw_combined and is_security_or_otp_message(raw_combined):
+    if is_security_or_otp_message(raw_combined, sender_id=sender_id):
         return {"accepted": False, "reason": "otp_or_security_message_ignored"}
 
     scrubbed_text, masked_acc = scrub_sensitive_text(raw_combined or (counterparty or "UPI Bridge Event"))
-    resolved_amount = round(float(amount), 2) if (amount is not None and amount > 0) else _extract_amount(scrubbed_text)
-    if resolved_amount <= 0:
+    resolved_amount_dec = (
+        to_money(amount)
+        if (amount is not None and to_money(amount) > ZERO)
+        else _extract_amount(scrubbed_text)
+    )
+    if resolved_amount_dec <= ZERO:
         return {"accepted": False, "reason": "no_transaction_amount_detected"}
 
-    # Determine direction (prefer explicit normalized field, else cue regex)
+    # Determine direction (prefer explicit normalized field; check debit-before-credit when ICICI says "Acct debited; Merchant credited")
     if direction and direction.strip().upper() in ("CREDIT", "DEBIT"):
         tx_type = direction.strip().upper()
-    elif _CREDIT_CUE_RE.search(scrubbed_text):
-        tx_type = "CREDIT"
-    elif _DEBIT_CUE_RE.search(scrubbed_text):
-        tx_type = "DEBIT"
     else:
-        return {"accepted": False, "reason": "no_credit_or_debit_direction"}
+        cr_match = _CREDIT_CUE_RE.search(scrubbed_text)
+        dr_match = _DEBIT_CUE_RE.search(scrubbed_text)
+        if cr_match and dr_match:
+            # Whichever cue appears FIRST describes the user's own account action
+            # (e.g. ICICI: "Acct XX123 debited for Rs 840; BLINKIT credited" -> DEBIT)
+            tx_type = "DEBIT" if dr_match.start() < cr_match.start() else "CREDIT"
+        elif cr_match:
+            tx_type = "CREDIT"
+        elif dr_match:
+            tx_type = "DEBIT"
+        else:
+            return {"accepted": False, "reason": "no_credit_or_debit_direction"}
 
-    dt = timestamp.astimezone(UTC) if timestamp and timestamp.tzinfo else (timestamp.replace(tzinfo=UTC) if timestamp else datetime.now(UTC))
+    if timestamp is not None:
+        dt = timestamp.astimezone(UTC) if timestamp.tzinfo else timestamp.replace(tzinfo=UTC)
+    else:
+        dt = _extract_sms_date(scrubbed_text) or datetime.now(UTC)
     date_str = dt.strftime("%Y-%m-%d")
 
     upper_text = scrubbed_text.upper()
-    mode = "NEFT" if "NEFT" in upper_text else ("IMPS" if "IMPS" in upper_text else ("RTGS" if "RTGS" in upper_text else "UPI"))
+    if "NEFT" in upper_text:
+        mode = "NEFT"
+    elif "IMPS" in upper_text:
+        mode = "IMPS"
+    elif "RTGS" in upper_text:
+        mode = "RTGS"
+    elif "CREDIT CARD" in upper_text or "DEBIT CARD" in upper_text or "CARD XX" in upper_text:
+        mode = "CARD"
+    else:
+        mode = "UPI"
 
-    app_hint = _resolve_app_name(app_package or source_channel, scrubbed_text)
+    app_hint = _resolve_app_name(app_package or source_channel, scrubbed_text, sender_id=sender_id)
     _, extracted_party, detected_app, vpa = classify_transaction(scrubbed_text, tx_type, mode, app_hint)
 
     resolved_party = (counterparty or "").strip() or extracted_party
@@ -332,7 +546,7 @@ def parse_upi_alert_payload(
         text=scrubbed_text,
         counterparty=resolved_party,
         direction=tx_type,
-        amount=resolved_amount,
+        amount=resolved_amount_dec,
         explicit_category=category,
         explicit_subcategory=subcategory,
         source_type="upi_bridge",
@@ -342,7 +556,7 @@ def parse_upi_alert_payload(
     extracted_ref = (txn_id or "").strip() or _extract_utr(scrubbed_text)
     if not extracted_ref:
         digest = hashlib.sha1(
-            f"{date_str}|{resolved_amount:.2f}|{tx_type}|{resolved_party.lower()}".encode()
+            f"{date_str}|{resolved_amount_dec:.2f}|{tx_type}|{resolved_party.lower()}".encode()
         ).hexdigest()[:12]
         extracted_ref = f"BRIDGE_{date_str.replace('-', '')}_{digest}"
 
@@ -352,7 +566,8 @@ def parse_upi_alert_payload(
             "txn_id": extracted_ref[:120],
             "timestamp": dt,
             "date": date_str,
-            "amount": resolved_amount,
+            "amount": money_to_float(resolved_amount_dec),
+            "amount_decimal": resolved_amount_dec,
             "type": tx_type,
             "mode": mode,
             "app": (detected_app or app_hint)[:50],
@@ -377,7 +592,7 @@ def build_automation_templates(token: str, api_base_url: str) -> dict[str, Any]:
         f'const VK_INGEST_TOKEN = "{token}";\n\n'
         "function syncUpiAlertsToVyaparKitaab() {\n"
         '  const label = GmailApp.getUserLabelByName("vk_synced") || GmailApp.createLabel("vk_synced");\n'
-        '  const threads = GmailApp.search(\'from:(googlepay-noreply@google.com OR alerts@paytm.com OR alerts@hdfcbank.net) newer_than:2d -label:vk_synced\', 0, 20);\n'
+        '  const threads = GmailApp.search(\'from:(googlepay-noreply@google.com OR alerts@paytm.com OR alerts@hdfcbank.net OR alerts@icicibank.com OR alerts@axisbank.com) newer_than:2d -label:vk_synced\', 0, 20);\n'
         "  for (const thread of threads) {\n"
         "    for (const msg of thread.getMessages()) {\n"
         '      const body = (msg.getPlainBody() || "").replace(/\\b\\d{13,18}\\b/g, "XXXX-XXXX").slice(0, 350);\n'
@@ -417,11 +632,13 @@ def build_automation_templates(token: str, api_base_url: str) -> dict[str, Any]:
             "net.one97.paytm (Paytm)",
             "com.phonepe.app (PhonePe)",
             "in.org.npci.upiapp (BHIM UPI)",
+            "Bank SMS DLT: HDFCBK, SBIBNK, SBIUPI, ICICIB, AXISBK, KOTAKB",
         ],
         "android_payload_template": json.dumps(
             {
                 "source_channel": "android_notification",
                 "app_package": "{notification_app_package}",
+                "sender_id": "{sms_sender}",
                 "title": "{notification_title}",
                 "message": "{notification_text}",
             },
@@ -433,7 +650,7 @@ def build_automation_templates(token: str, api_base_url: str) -> dict[str, Any]:
             'Trigger: When Message contains "UPI" or "debited" or "credited" (Run Immediately).',
             f"Action: Get Contents of URL -> {endpoint} (Method: POST).",
             "Headers: Content-Type = application/json, X-Ingest-Token = <your scoped token>.",
-            'JSON Body: { "source_channel": "ios_shortcut", "title": "UPI SMS", "message": [Shortcut Input] }.',
+            'JSON Body: { "source_channel": "ios_shortcut", "title": "Bank SMS", "message": [Shortcut Input] }.',
         ],
         "curl_test_command": curl_example,
     }
@@ -598,10 +815,11 @@ async def ingest_upi_bridge_event(
     message: str = "",
     title: str = "",
     app_package: str = "",
+    sender_id: str = "",
     source_channel: str = "android_notification",
     txn_id: str | None = None,
     timestamp: datetime | None = None,
-    amount: float | None = None,
+    amount: Decimal | float | None = None,
     direction: str | None = None,
     counterparty: str | None = None,
     category: str | None = None,
@@ -616,6 +834,7 @@ async def ingest_upi_bridge_event(
         message=message,
         title=title,
         app_package=app_package,
+        sender_id=sender_id,
         source_channel=source_channel,
         txn_id=txn_id,
         timestamp=timestamp,
@@ -675,4 +894,95 @@ async def ingest_upi_bridge_event(
         "status": "ingested",
         "imported_count": 1,
         "transaction": event_data,
+    }
+
+
+async def ingest_upi_bridge_batch(
+    db: AsyncSession,
+    user_id: uuid.UUID | str,
+    messages: list[dict[str, Any]],
+    *,
+    source_channel: str = "manual_sms_paste",
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """
+    Batch SMS / notification streamlining with zero-credential scrubbing, UTR deduplication,
+    optional `dry_run=True` preview, and atomic PostgreSQL persistence into `bank_transactions`
+    and `unified_transactions`.
+    """
+    uid = uuid.UUID(str(user_id)) if not isinstance(user_id, uuid.UUID) else user_id
+    parsed_rows: list[dict[str, Any]] = []
+    seen_txn_ids: set[str] = set()
+    ignored_items: list[dict[str, str]] = []
+    duplicates_skipped = 0
+
+    for idx, item in enumerate(messages[:200]):
+        res = parse_upi_alert_payload(
+            message=str(item.get("message") or ""),
+            title=str(item.get("title") or ""),
+            app_package=str(item.get("app_package") or ""),
+            sender_id=str(item.get("sender_id") or ""),
+            source_channel=str(item.get("source_channel") or source_channel),
+            txn_id=item.get("txn_id"),
+            timestamp=item.get("timestamp"),
+            amount=item.get("amount"),
+            direction=item.get("direction"),
+            counterparty=item.get("counterparty"),
+            category=item.get("category"),
+            subcategory=item.get("subcategory"),
+        )
+        if not res["accepted"]:
+            ignored_items.append({"index": str(idx), "reason": str(res["reason"])})
+            continue
+        txn = res["transaction"]
+        if txn["txn_id"] in seen_txn_ids:
+            duplicates_skipped += 1
+            continue
+        seen_txn_ids.add(txn["txn_id"])
+        parsed_rows.append(txn)
+
+    source_tag = f"upi_bridge:{source_channel[:30]}"
+    if not dry_run and parsed_rows:
+        await import_statement_transactions(
+            db=db, user_id=uid, parsed_rows=parsed_rows, source=source_tag
+        )
+        record = await _get_config_record(db, uid)
+        if record is not None:
+            meta = json.loads(record.payload or "{}")
+            meta["ingest_count"] = int(meta.get("ingest_count") or 0) + len(parsed_rows)
+            meta["last_ingest_at"] = datetime.now(UTC).isoformat()
+            meta["last_app"] = parsed_rows[-1]["app"]
+            record.payload = json.dumps(meta)
+            await db.commit()
+
+    credits_count = sum(1 for r in parsed_rows if r["type"] == "CREDIT")
+    debits_count = sum(1 for r in parsed_rows if r["type"] == "DEBIT")
+    preview = [
+        {
+            "txn_id": r["txn_id"],
+            "date": r["date"],
+            "amount": r["amount"],
+            "type": r["type"],
+            "mode": r["mode"],
+            "app": r["app"],
+            "counterparty": r["counterparty"],
+            "category": r.get("canonical_category", r["category"]),
+            "subcategory": r.get("subcategory", "General"),
+            "masked_acc": r["masked_acc"],
+            "narration": r["narration"],
+        }
+        for r in parsed_rows
+    ]
+
+    return {
+        "status": "preview" if dry_run else "ingested",
+        "dry_run": dry_run,
+        "total_messages": len(messages[:200]),
+        "imported_count": len(parsed_rows),
+        "credits_count": credits_count,
+        "debits_count": debits_count,
+        "ignored_count": len(ignored_items),
+        "duplicates_skipped": duplicates_skipped,
+        "ignored_reasons": ignored_items[:25],
+        "transactions": preview,
     }

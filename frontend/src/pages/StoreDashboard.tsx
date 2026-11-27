@@ -12,6 +12,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { BankingIncomeExplorer } from '../components/BankingIncomeExplorer';
+import { CashflowTimeSeriesPanel } from '../components/CashflowTimeSeriesPanel';
 import { PaymentBreakdownChart } from '../components/PaymentBreakdownChart';
 import { ReceiptOcrModal } from '../components/ReceiptOcrModal';
 import { UnifiedCategoryPanel } from '../components/UnifiedCategoryPanel';
@@ -386,6 +387,9 @@ export function StoreDashboard() {
       )}
 
       {/* TAB 3: AI/ML Demand & Cash-Flow Forecasting Section */}
+      {(activeTab === 'ai_forecast' || activeTab === 'all') && (
+        <CashflowTimeSeriesPanel view="all" />
+      )}
       {(activeTab === 'ai_forecast' || activeTab === 'all') && ai.data && (
         <section className="rounded-lg border border-rule bg-canvas-raised p-5 space-y-4" aria-label="AI Demand Forecast">
           <div className="flex flex-wrap items-center justify-between gap-2">

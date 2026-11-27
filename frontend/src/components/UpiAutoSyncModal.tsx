@@ -7,6 +7,7 @@ import {
   FileCode2,
   KeyRound,
   Mail,
+  MessageSquareText,
   RefreshCw,
   Send,
   ShieldCheck,
@@ -14,6 +15,8 @@ import {
   X,
 } from 'lucide-react';
 import {
+  type SmsBatchImportResult,
+  useImportSmsMessages,
   useRotateUpiBridgeToken,
   useTestUpiBridgeIngest,
   useUpiBridgeConfig,
@@ -25,14 +28,25 @@ export interface UpiAutoSyncModalProps {
   onSynced?: (summary: string) => void;
 }
 
-type BridgeTab = 'android' | 'gmail' | 'ios' | 'takeout';
+type BridgeTab = 'sms_paste' | 'android' | 'gmail' | 'ios' | 'takeout';
+
+const SAMPLE_BANK_SMS_BATCH = [
+  'AD-HDFCBK: Sent Rs.485.50 From HDFC Bank A/C *4821 To SWIGGY On 22/11/26 Ref 432610011223. Avl Bal: Rs 45,200.00',
+  'VM-SBIUPI: Dear UPI user A/C X3421 debited by 640.0 on date 23Nov26 trf to INDIANOIL Refno 432710022334',
+  'JX-ICICIB: ICICI Bank Acct XX1029 debited for Rs 1299.00 on 24-Nov-26; BLINKIT credited. UPI:432810033445. Avl Bal: INR 18,900.00',
+  'AX-AXISBK: INR 3450.00 credited to A/c no. XX9912 on 25-Nov-26. Info- UPI/CR/432910044556/RAHUL SHARMA',
+  'AD-HDFCBK: 849201 is your OTP for Rs 5,000 txn. Do not share OTP with anyone.',
+].join('\n\n');
 
 export function UpiAutoSyncModal({ open, onClose, onSynced }: UpiAutoSyncModalProps) {
   const { data: config, isLoading } = useUpiBridgeConfig(open);
   const rotateMutation = useRotateUpiBridgeToken();
   const testIngestMutation = useTestUpiBridgeIngest();
+  const smsImportMutation = useImportSmsMessages();
 
-  const [activeTab, setActiveTab] = useState<BridgeTab>('android');
+  const [activeTab, setActiveTab] = useState<BridgeTab>('sms_paste');
+  const [smsDraft, setSmsDraft] = useState('');
+  const [smsPreview, setSmsPreview] = useState<SmsBatchImportResult | null>(null);
   const [revealToken, setRevealToken] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -221,10 +235,11 @@ export function UpiAutoSyncModal({ open, onClose, onSynced }: UpiAutoSyncModalPr
         <div className="flex flex-wrap gap-1 rounded-xl border border-rule bg-canvas-sunk p-1">
           {(
             [
-              { id: 'android', label: 'Android (GPay / Paytm / SMS)', icon: Smartphone },
+              { id: 'sms_paste', label: 'Paste Bank SMS', icon: MessageSquareText },
+              { id: 'android', label: 'Android Auto-Forward', icon: Smartphone },
               { id: 'gmail', label: 'Gmail Apps Script', icon: Mail },
               { id: 'ios', label: 'iOS Shortcuts', icon: Smartphone },
-              { id: 'takeout', label: 'Google Takeout HTML', icon: FileCode2 },
+              { id: 'takeout', label: 'Google Takeout', icon: FileCode2 },
             ] as const
           ).map((tab) => {
             const Icon = tab.icon;
@@ -247,6 +262,121 @@ export function UpiAutoSyncModal({ open, onClose, onSynced }: UpiAutoSyncModalPr
         </div>
 
         {/* Tab Body */}
+        {activeTab === 'sms_paste' && (
+          <div className="space-y-3 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-ink-soft">
+                Paste real <strong className="text-ink">HDFC, SBI, ICICI, Axis, Kotak, GPay, PhonePe, or Paytm</strong> transaction SMS messages (one per line or blank-line separated). OTPs, PINs, account/card numbers, PAN, URLs, and bank balances are automatically stripped before saving.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSmsDraft(SAMPLE_BANK_SMS_BATCH);
+                  setSmsPreview(null);
+                }}
+                className="rounded border border-navy/30 bg-navy-tint px-2.5 py-1 text-[11px] font-semibold text-navy hover:bg-navy hover:text-white transition-colors"
+              >
+                Load Sample SMS Batch
+              </button>
+            </div>
+
+            <textarea
+              rows={5}
+              value={smsDraft}
+              onChange={(e) => {
+                setSmsDraft(e.target.value);
+                setSmsPreview(null);
+              }}
+              placeholder="Paste bank / UPI transaction SMS messages here (e.g. AD-HDFCBK: Sent Rs.450.00 From HDFC Bank A/C *1234 To SWIGGY On 26/11/26 Ref 432910293847)…"
+              className="w-full rounded-lg border border-rule bg-canvas p-3 font-mono text-[11px] text-ink outline-none focus:border-navy"
+            />
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={!smsDraft.trim() || smsImportMutation.isPending}
+                onClick={() => {
+                  smsImportMutation.mutate(
+                    { raw_text: smsDraft, dry_run: true },
+                    {
+                      onSuccess: (res) => {
+                        setSmsPreview(res);
+                        setFeedback(
+                          `Preview ready: ${res.imported_count} valid txns (${res.credits_count} credit, ${res.debits_count} debit), ${res.ignored_count} OTP/spam/failed blocked.`,
+                        );
+                      },
+                      onError: (err) => setFeedback(err instanceof Error ? err.message : 'Preview failed'),
+                    },
+                  );
+                }}
+                className="rounded-lg border border-navy bg-canvas px-3 py-1.5 font-bold text-navy hover:bg-navy-tint disabled:opacity-50"
+              >
+                {smsImportMutation.isPending ? 'Scanning…' : 'Preview & Scrub (Dry Run)'}
+              </button>
+
+              <button
+                type="button"
+                disabled={!smsDraft.trim() || smsImportMutation.isPending}
+                onClick={() => {
+                  smsImportMutation.mutate(
+                    { raw_text: smsDraft, dry_run: false },
+                    {
+                      onSuccess: (res) => {
+                        setSmsPreview(res);
+                        const summary = `Streamlined ${res.imported_count} SMS transactions (${res.credits_count} credits, ${res.debits_count} debits) into Ledger & Time Series (${res.ignored_count} OTP/spam blocked).`;
+                        setFeedback(summary);
+                        onSynced?.(summary);
+                      },
+                      onError: (err) => setFeedback(err instanceof Error ? err.message : 'SMS import failed'),
+                    },
+                  );
+                }}
+                className="rounded-lg bg-emerald-600 px-3.5 py-1.5 font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {smsImportMutation.isPending ? 'Importing…' : 'Streamline into Ledger & Time Series'}
+              </button>
+            </div>
+
+            {smsPreview && smsPreview.transactions.length > 0 && (
+              <div className="rounded-lg border border-rule bg-canvas overflow-x-auto max-h-48">
+                <table className="min-w-full text-[11px]">
+                  <thead className="bg-canvas-sunk border-b border-rule text-left text-ink-soft">
+                    <tr>
+                      <th className="px-2.5 py-1.5">Date</th>
+                      <th className="px-2.5 py-1.5">Bank / App</th>
+                      <th className="px-2.5 py-1.5">Party &amp; Scrubbed Text</th>
+                      <th className="px-2.5 py-1.5">Category</th>
+                      <th className="px-2.5 py-1.5 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-rule">
+                    {smsPreview.transactions.map((t) => (
+                      <tr key={t.txn_id}>
+                        <td className="px-2.5 py-1.5 font-mono text-ink-soft whitespace-nowrap">{t.date}</td>
+                        <td className="px-2.5 py-1.5 font-semibold text-ink whitespace-nowrap">{t.app}</td>
+                        <td className="px-2.5 py-1.5 text-ink">
+                          <div className="font-semibold">{t.counterparty}</div>
+                          <div className="text-[10px] text-ink-soft truncate max-w-xs">{t.narration}</div>
+                        </td>
+                        <td className="px-2.5 py-1.5 text-ink-soft whitespace-nowrap">
+                          {t.category} › {t.subcategory}
+                        </td>
+                        <td
+                          className={`num px-2.5 py-1.5 text-right font-bold whitespace-nowrap ${
+                            t.type === 'CREDIT' ? 'text-emerald-700' : 'text-rose-700'
+                          }`}
+                        >
+                          {t.type === 'CREDIT' ? '+' : '-'}₹{t.amount.toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'android' && templates && (
           <div className="space-y-3 text-xs text-ink-soft">
             <p className="leading-relaxed">

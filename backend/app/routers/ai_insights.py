@@ -10,6 +10,7 @@ from app.services.auth import get_current_user
 from app.services.forecasting import generate_business_ai_forecast
 from app.services.ml_models import summarize_payments_made_to_others
 from app.services.nl_assistant import answer_financial_question
+from app.services.timeseries import build_cashflow_timeseries
 
 router = APIRouter(prefix="/ai", tags=["ai-forecasting"])
 
@@ -61,4 +62,28 @@ async def query_financial_assistant(
     and forecast queries directly from `unified_transactions` and ML models.
     """
     return await answer_financial_question(db=db, user=user, question=payload.question)
+
+
+@router.get("/cashflow-timeseries")
+async def get_cashflow_timeseries(
+    lookback_days: int = Query(default=30, ge=7, le=180),
+    horizon_days: int = Query(default=14, ge=3, le=30),
+    granularity: str = Query(default="daily", pattern="^(daily|weekly)$"),
+    view: str = Query(default="all", pattern="^(all|customer|store)$"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """
+    Unified chronological time-series & multi-model cashflow forecast built directly
+    over streamlined SMS/UPI alerts, Razorpay settlements, statements, OCR bills,
+    and store invoices (with 80% prediction bands, weekday seasonality & anomaly flags).
+    """
+    return await build_cashflow_timeseries(
+        db=db,
+        user=user,
+        lookback_days=lookback_days,
+        horizon_days=horizon_days,
+        granularity=granularity,
+        view=view,
+    )
 

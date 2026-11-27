@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cores.config import settings
 from app.cores.database import get_db
+from app.cores.rate_limit import enforce_rate_limit
 from app.models.user import User
 from app.schemas.banking import (
     BankingConsentRequest,
@@ -34,6 +36,7 @@ from app.services.statement_importer import (
 )
 from app.services.upi_bridge import (
     get_or_create_bridge_config,
+    ingest_upi_bridge_batch,
     ingest_upi_bridge_event,
     rotate_bridge_token,
     verify_bridge_token,
@@ -311,10 +314,11 @@ async def emit_single_bank_credit(
 
 
 class UpiBridgeIngestPayload(BaseModel):
-    """Normalized or sanitized alert payload pushed from optional external UPI connectors."""
+    """Normalized or sanitized alert payload pushed from optional external UPI/SMS connectors."""
 
     source_channel: str = Field(default="android_notification", max_length=64)
     app_package: str = Field(default="", max_length=120)
+    sender_id: str = Field(default="", max_length=32)
     title: str = Field(default="", max_length=300)
     message: str = Field(default="", max_length=16000)
     txn_id: str | None = Field(default=None, max_length=120)
@@ -324,6 +328,15 @@ class UpiBridgeIngestPayload(BaseModel):
     counterparty: str | None = Field(default=None, max_length=180)
     category: str | None = Field(default=None, max_length=80)
     subcategory: str | None = Field(default=None, max_length=80)
+
+
+class SmsBatchImportPayload(BaseModel):
+    """Batch bank/UPI SMS messages for zero-leak scrubbing and time-series streamlining."""
+
+    messages: list[UpiBridgeIngestPayload] = Field(default_factory=list, max_length=200)
+    raw_text: str | None = Field(default=None, max_length=120000)
+    source_channel: str = Field(default="manual_sms_paste", max_length=64)
+    dry_run: bool = False
 
 
 @router.get("/upi-bridge/config")
@@ -375,6 +388,7 @@ async def ingest_upi_bridge_webhook(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or rotated UPI bridge ingest token.",
         )
+    await enforce_rate_limit(f"upi_bridge:{user_id}", max_requests=60, window_seconds=60, db=db)
 
     return await ingest_upi_bridge_event(
         db=db,
@@ -382,6 +396,7 @@ async def ingest_upi_bridge_webhook(
         message=payload.message,
         title=payload.title,
         app_package=payload.app_package,
+        sender_id=payload.sender_id,
         source_channel=payload.source_channel,
         txn_id=payload.txn_id,
         timestamp=payload.timestamp,
@@ -390,6 +405,82 @@ async def ingest_upi_bridge_webhook(
         counterparty=payload.counterparty,
         category=payload.category,
         subcategory=payload.subcategory,
+    )
+
+
+def _split_raw_sms_block(raw_text: str) -> list[dict[str, Any]]:
+    """Splits pasted multi-SMS text (blank-line or line-separated) into individual message dicts."""
+    blocks = [b.strip() for b in re.split(r"\n\s*\n+", raw_text.strip()) if b.strip()]
+    if len(blocks) == 1 and "\n" in blocks[0]:
+        lines = [ln.strip() for ln in blocks[0].splitlines() if ln.strip()]
+        if len(lines) > 1:
+            blocks = lines
+    items: list[dict[str, Any]] = []
+    for block in blocks[:200]:
+        # Optional "SENDER: message" prefix (e.g. "AD-HDFCBK: Sent Rs.450...")
+        m = re.match(r"^([A-Za-z]{2}-[A-Za-z0-9]{4,8}(?:-[STPG])?)\s*[:|]\s*(.+)$", block, re.DOTALL)
+        if m:
+            items.append({"sender_id": m.group(1).strip(), "message": m.group(2).strip()})
+        else:
+            items.append({"message": block})
+    return items
+
+
+@router.post("/upi-bridge/ingest-batch")
+async def ingest_upi_bridge_batch_webhook(
+    payload: SmsBatchImportPayload,
+    request: Request,
+    x_ingest_token: str | None = Header(default=None, alias="X-Ingest-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Batch webhook endpoint for device automations pushing multiple bank/UPI SMS alerts."""
+    if "token" in request.query_params or "ingest_token" in request.query_params:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Do not pass ingest tokens in URL query parameters; use the X-Ingest-Token header.",
+        )
+    if not x_ingest_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing X-Ingest-Token header.")
+    user_id = await verify_bridge_token(db=db, token=x_ingest_token.strip())
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or rotated UPI bridge ingest token.")
+    await enforce_rate_limit(f"upi_bridge:{user_id}", max_requests=60, window_seconds=60, db=db)
+
+    msgs = [m.model_dump() for m in payload.messages]
+    if payload.raw_text and payload.raw_text.strip():
+        msgs.extend(_split_raw_sms_block(payload.raw_text))
+    if not msgs:
+        raise HTTPException(status_code=400, detail="Provide at least one SMS or notification message.")
+    return await ingest_upi_bridge_batch(
+        db=db,
+        user_id=user_id,
+        messages=msgs,
+        source_channel=payload.source_channel,
+        dry_run=payload.dry_run,
+    )
+
+
+@router.post("/sms-import")
+async def import_bank_sms_messages(
+    payload: SmsBatchImportPayload,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """
+    Authenticated zero-leak Bank & UPI SMS batch importer with optional `dry_run=true`
+    preview. Automatically strips OTPs, PINs, account/card numbers, PAN, URLs, and bank balances.
+    """
+    msgs = [m.model_dump() for m in payload.messages]
+    if payload.raw_text and payload.raw_text.strip():
+        msgs.extend(_split_raw_sms_block(payload.raw_text))
+    if not msgs:
+        raise HTTPException(status_code=400, detail="Paste at least one bank or UPI SMS message to parse.")
+    return await ingest_upi_bridge_batch(
+        db=db,
+        user_id=user.id,
+        messages=msgs,
+        source_channel=payload.source_channel,
+        dry_run=payload.dry_run,
     )
 
 

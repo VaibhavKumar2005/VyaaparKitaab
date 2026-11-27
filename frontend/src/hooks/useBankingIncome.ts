@@ -681,6 +681,64 @@ export function useStopBankDemoStream() {
   });
 }
 
+export interface SmsBatchPreviewTxn {
+  txn_id: string;
+  date: string;
+  amount: number;
+  type: 'CREDIT' | 'DEBIT';
+  mode: string;
+  app: string;
+  counterparty: string;
+  category: string;
+  subcategory: string;
+  masked_acc: string;
+  narration: string;
+}
+
+export interface SmsBatchImportResult {
+  status: 'preview' | 'ingested';
+  dry_run: boolean;
+  total_messages: number;
+  imported_count: number;
+  credits_count: number;
+  debits_count: number;
+  ignored_count: number;
+  duplicates_skipped: number;
+  ignored_reasons: Array<{ index: string; reason: string }>;
+  transactions: SmsBatchPreviewTxn[];
+}
+
+export function useImportSmsMessages() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: {
+      raw_text: string;
+      dry_run?: boolean;
+      source_channel?: string;
+    }): Promise<SmsBatchImportResult> => {
+      return await apiFetch<SmsBatchImportResult>('/banking/sms-import', {
+        method: 'POST',
+        body: JSON.stringify({
+          raw_text: payload.raw_text,
+          dry_run: Boolean(payload.dry_run),
+          source_channel: payload.source_channel ?? 'manual_sms_paste',
+        }),
+      });
+    },
+    onSuccess: (_res, vars) => {
+      if (!vars.dry_run) {
+        queryClient.invalidateQueries({ queryKey: ['personal_spending'] });
+        queryClient.invalidateQueries({ queryKey: ['banking_income_stream'] });
+        queryClient.invalidateQueries({ queryKey: ['banking_income_graph'] });
+        queryClient.invalidateQueries({ queryKey: ['unified_transactions'] });
+        queryClient.invalidateQueries({ queryKey: ['reconcile_suggestions'] });
+        queryClient.invalidateQueries({ queryKey: ['cashflow_timeseries'] });
+        queryClient.invalidateQueries({ queryKey: ['upi_bridge_config'] });
+      }
+    },
+  });
+}
+
 export function useEmitBankCredit() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -958,6 +1016,8 @@ export function useTestUpiBridgeIngest() {
       queryClient.invalidateQueries({ queryKey: ['personal_spending'] });
       queryClient.invalidateQueries({ queryKey: ['banking_income_stream'] });
       queryClient.invalidateQueries({ queryKey: ['banking_income_graph'] });
+      queryClient.invalidateQueries({ queryKey: ['unified_transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['cashflow_timeseries'] });
     },
   });
 }

@@ -44,6 +44,7 @@ import { usePaymentStream } from '../hooks/usePaymentStream';
 import { formatINR, formatINRPrecise } from '../lib/format';
 import { LiveBankFeed } from './LiveBankFeed';
 import { UpiAutoSyncModal } from './UpiAutoSyncModal';
+import { CashflowTimeSeriesPanel } from './CashflowTimeSeriesPanel';
 
 const SUPPORTED_BANKS = [
   { id: 'sbi_yono', name: 'SBI YONO', fullName: 'State Bank of India (YONO)', color: 'bg-blue-600' },
@@ -140,12 +141,13 @@ export function BankingIncomeExplorer() {
       return;
     }
     try {
-      const params = new URLSearchParams({
-        phone: boundTarget,
-        purpose: 'AA_CONSENT',
-      });
-      const res = await fetch(`/api/v1/auth/otp/send?${params.toString()}`, {
+      const res = await fetch('/api/v1/auth/otp/send', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: boundTarget,
+          purpose: 'AA_CONSENT',
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Failed to send OTP' }));
@@ -173,13 +175,14 @@ export function BankingIncomeExplorer() {
     }
     const boundTarget = aaEmail.trim() || aaPhone.trim();
     try {
-      const verifyParams = new URLSearchParams({
-        phone: boundTarget,
-        otp: aaOtpCode.trim(),
-        purpose: 'AA_CONSENT',
-      });
-      const verifyRes = await fetch(`/api/v1/auth/otp/verify?${verifyParams.toString()}`, {
+      const verifyRes = await fetch('/api/v1/auth/otp/verify', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: boundTarget,
+          otp: aaOtpCode.trim(),
+          purpose: 'AA_CONSENT',
+        }),
       });
       if (!verifyRes.ok) {
         const err = await verifyRes.json().catch(() => ({ detail: 'Invalid or expired OTP' }));
@@ -769,6 +772,9 @@ export function BankingIncomeExplorer() {
 
       {/* Real-time Account Aggregator Live Bank Feed Panel */}
       <LiveBankFeed />
+
+      {/* Unified Chronological Cashflow Time-Series & Multi-Model Forecast (SMS/UPI + Razorpay + Ledger) */}
+      <CashflowTimeSeriesPanel view="all" />
 
       {/* Dual Chart: Monthly Inward Trend + Recent Credits Ledger */}
       <div className="grid gap-5 lg:grid-cols-2">

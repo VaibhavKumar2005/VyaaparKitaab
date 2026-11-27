@@ -103,20 +103,41 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     return response
 
 
+class OtpSendRequest(BaseModel):
+    phone: str
+    purpose: str = "TRANSACTION"
+    email: str | None = None
+
+
+class OtpVerifyRequest(BaseModel):
+    phone: str
+    otp: str
+    purpose: str = "TRANSACTION"
+
+
 @router.post("/otp/send")
 async def send_otp(
-    phone: str,
+    phone: str | None = None,
     purpose: str = "TRANSACTION",
     email: str | None = None,
+    body: OtpSendRequest | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    raw_identifier = phone.strip()
+    resolved_phone = (body.phone if body else phone) or ""
+    resolved_purpose = body.purpose if body else purpose
+    resolved_email = body.email if body else email
+    if not resolved_phone.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Phone number or email is required",
+        )
+    raw_identifier = resolved_phone.strip()
     clean_phone = raw_identifier if "@" in raw_identifier else raw_identifier.replace(" ", "").replace("+91", "")
     await enforce_rate_limit(
         f"otp_send:{clean_phone}", max_requests=5, window_seconds=60, db=db
     )
     try:
-        return await dispatch_otp(db, clean_phone, purpose, email=email)
+        return await dispatch_otp(db, clean_phone, resolved_purpose, email=resolved_email)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -187,13 +208,27 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/otp/verify")
-async def verify_otp_endpoint(phone: str, otp: str, purpose: str = "TRANSACTION", db: AsyncSession = Depends(get_db)):
-    raw_identifier = phone.strip()
+async def verify_otp_endpoint(
+    phone: str | None = None,
+    otp: str | None = None,
+    purpose: str = "TRANSACTION",
+    body: OtpVerifyRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    resolved_phone = (body.phone if body else phone) or ""
+    resolved_otp = (body.otp if body else otp) or ""
+    resolved_purpose = body.purpose if body else purpose
+    if not resolved_phone.strip() or not resolved_otp.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Phone/email and OTP code are required",
+        )
+    raw_identifier = resolved_phone.strip()
     clean_phone = raw_identifier.lower() if "@" in raw_identifier else raw_identifier.replace(" ", "").replace("+91", "")
     await enforce_rate_limit(
         f"otp_verify:{clean_phone}", max_requests=10, window_seconds=60, db=db
     )
-    is_valid = await check_otp_code(db, clean_phone, otp, purpose)
+    is_valid = await check_otp_code(db, clean_phone, resolved_otp, resolved_purpose)
     if is_valid:
         if "@" in clean_phone:
             user_res = await db.execute(select(User).where(User.email == clean_phone))

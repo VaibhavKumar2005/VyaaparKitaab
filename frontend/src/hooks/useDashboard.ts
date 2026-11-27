@@ -131,6 +131,63 @@ export function useStoreDashboard() {
   });
 }
 
+export type CashflowHistoricalPoint = {
+  date: string;
+  inflow: number;
+  outflow: number;
+  net_cashflow: number;
+  cumulative_net: number;
+  rolling_7d_inflow: number;
+  rolling_7d_outflow: number;
+  txn_count: number;
+  is_anomaly: boolean;
+  anomaly_reason: string | null;
+};
+
+export type CashflowForecastPoint = {
+  date: string;
+  projected_inflow: number;
+  inflow_lower: number;
+  inflow_upper: number;
+  projected_outflow: number;
+  outflow_lower: number;
+  outflow_upper: number;
+  projected_net: number;
+};
+
+export type CashflowTimeSeriesData = {
+  generated_at: string;
+  lookback_days: number;
+  horizon_days: number;
+  granularity: 'daily' | 'weekly';
+  view: 'all' | 'customer' | 'store';
+  summary: {
+    total_inflow: number;
+    total_outflow: number;
+    net_cashflow: number;
+    avg_daily_inflow: number;
+    avg_daily_outflow: number;
+    projected_inflow_total: number;
+    projected_outflow_total: number;
+    projected_net_total: number;
+    inflow_growth_pct: number;
+    outflow_growth_pct: number;
+    total_transactions: number;
+    anomaly_count: number;
+  };
+  models: {
+    inflow_selected: string;
+    outflow_selected: string;
+    inflow_metrics: Record<string, { mae: number; rmse: number }>;
+    outflow_metrics: Record<string, { mae: number; rmse: number }>;
+  };
+  sources: Array<{ source: string; volume: number; count: number }>;
+  historical: CashflowHistoricalPoint[];
+  forecast: CashflowForecastPoint[];
+  seasonality: Array<{ day: string; avg_inflow: number; avg_outflow: number; avg_net: number }>;
+  anomalies: Array<{ date: string; inflow: number; outflow: number; reason: string }>;
+};
+
 export function useAiForecast() {
   return useQuery({
     queryKey: ['dashboard', 'ai-forecast'],
@@ -140,5 +197,32 @@ export function useAiForecast() {
       }
       return await apiFetch<AiForecastData>('/ai/forecast');
     },
+  });
+}
+
+export function useCashflowTimeSeries(options?: {
+  lookbackDays?: number;
+  horizonDays?: number;
+  granularity?: 'daily' | 'weekly';
+  view?: 'all' | 'customer' | 'store';
+}) {
+  const lookback = options?.lookbackDays ?? 30;
+  const horizon = options?.horizonDays ?? 14;
+  const granularity = options?.granularity ?? 'daily';
+  const view = options?.view ?? 'all';
+
+  return useQuery<CashflowTimeSeriesData>({
+    queryKey: ['cashflow_timeseries', lookback, horizon, granularity, view],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        lookback_days: String(lookback),
+        horizon_days: String(horizon),
+        granularity,
+        view,
+      });
+      return await apiFetch<CashflowTimeSeriesData>(`/ai/cashflow-timeseries?${params.toString()}`);
+    },
+    enabled: !isDemoMode(),
+    staleTime: 10000,
   });
 }
